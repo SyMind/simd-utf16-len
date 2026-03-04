@@ -1,0 +1,13 @@
+[package]
+name = "simd-utf16-len"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = { package = "codspeed-criterion-compat", version = "2.7" }
+
+[[bench]]
+name = "utf16_len"
+harness = false
