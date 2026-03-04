@@ -19,12 +19,11 @@ fn bench_inputs(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("utf16_len");
     for &(name, input) in inputs {
-        let bytes = input.as_bytes();
-        group.bench_with_input(BenchmarkId::new("simd", name), bytes, |b, bytes| {
-            b.iter(|| utf16_len(black_box(bytes)));
+        group.bench_function(BenchmarkId::new("simd", name), |b| {
+            b.iter(|| black_box(utf16_len(input)));
         });
-        group.bench_with_input(BenchmarkId::new("std", name), &input, |b, input| {
-            b.iter(|| black_box(*input).encode_utf16().count());
+        group.bench_function(BenchmarkId::new("std", name), |b| {
+            b.iter(|| black_box(input.encode_utf16().count()));
         });
     }
     group.finish();

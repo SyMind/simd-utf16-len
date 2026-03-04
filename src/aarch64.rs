@@ -2,9 +2,10 @@
 
 use std::arch::aarch64::*;
 
-/// Compute the number of UTF-16 code units for UTF-8 bytes using NEON.
+/// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 #[allow(unsafe_code)]
-pub fn utf16_len(bytes: &[u8]) -> usize {
+pub fn utf16_len(s: &str) -> usize {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     if len == 0 {
         return 0;

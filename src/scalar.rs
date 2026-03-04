@@ -1,7 +1,8 @@
 //! Scalar fallback for platforms without SIMD support.
 
-/// Compute the number of UTF-16 code units for UTF-8 bytes using scalar code.
-pub fn utf16_len(bytes: &[u8]) -> usize {
+/// Compute the number of UTF-16 code units for UTF-8 string using scalar code.
+pub fn utf16_len(s: &str) -> usize {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;

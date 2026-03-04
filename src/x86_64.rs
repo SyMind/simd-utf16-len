@@ -5,10 +5,10 @@
 
 use std::arch::x86_64::*;
 
-/// Compute the number of UTF-16 code units for UTF-8 bytes.
+/// Compute the number of UTF-16 code units for UTF-8 string.
 #[allow(unsafe_code)]
-pub fn utf16_len(bytes: &[u8]) -> usize {
-    let len = bytes.len();
+pub fn utf16_len(s: &str) -> usize {
+    let len = s.len();
     if len == 0 {
         return 0;
     }
@@ -16,16 +16,17 @@ pub fn utf16_len(bytes: &[u8]) -> usize {
     // SAFETY: Feature detection ensures the correct SIMD path is used.
     unsafe {
         if std::is_x86_feature_detected!("avx2") {
-            utf16_length_avx2(bytes)
+            utf16_length_avx2(s)
         } else {
-            utf16_length_sse2(bytes)
+            utf16_length_sse2(s)
         }
     }
 }
 
 /// AVX2 implementation: processes 32 bytes per iteration.
 #[target_feature(enable = "avx2")]
-unsafe fn utf16_length_avx2(bytes: &[u8]) -> usize {
+unsafe fn utf16_length_avx2(s: &str) -> usize {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
@@ -45,7 +46,7 @@ unsafe fn utf16_length_avx2(bytes: &[u8]) -> usize {
         let mut four_acc = zero;
 
         for _ in 0..batch {
-            let chunk = _mm256_loadu_si256(bytes.as_ptr().add(i) as *const __m256i);
+            let chunk = _mm256_loadu_si256(s.as_ptr().add(i) as *const __m256i);
 
             let masked = _mm256_and_si256(chunk, cont_mask);
             let is_cont = _mm256_cmpeq_epi8(masked, cont_val);
@@ -86,7 +87,8 @@ unsafe fn hsum_u8_avx2(v: __m256i, zero: __m256i) -> usize {
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
-unsafe fn utf16_length_sse2(bytes: &[u8]) -> usize {
+unsafe fn utf16_length_sse2(s: &str) -> usize {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
