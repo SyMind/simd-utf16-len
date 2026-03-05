@@ -40,30 +40,36 @@ Benchmarks run in CI on real hardware across three platforms. See [workflow](.gi
 
 ### Linux x86_64
 
+CPU: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+
 | Input | Bytes | SIMD (ns/iter) | std (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------:|--------:|
-| ascii |   169 |           31.7 |         117.8 |   3.7x |
-| cjk   |   194 |           30.7 |          99.0 |   3.2x |
-| emoji |   170 |           29.0 |         102.7 |   3.5x |
-| mixed |   144 |           33.5 |         107.8 |   3.2x |
+| ascii |   169 |           14.3 |         107.4 |   7.5x |
+| cjk   |   194 |           10.9 |          96.0 |   8.8x |
+| emoji |   170 |           15.2 |         100.4 |   6.6x |
+| mixed |   144 |            8.6 |         102.8 |  12.0x |
 
 ### macOS aarch64
 
+CPU: Apple M1 (Virtual)
+
 | Input | Bytes | SIMD (ns/iter) | std (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------:|--------:|
-| ascii |   169 |           11.4 |          91.0 |   8.0x |
-| cjk   |   194 |            8.4 |          83.7 |  10.0x |
-| emoji |   170 |           13.1 |          87.3 |   6.7x |
-| mixed |   144 |            7.4 |          82.3 |  11.2x |
+| ascii |   169 |           11.9 |          85.8 |   7.2x |
+| cjk   |   194 |            8.0 |          73.5 |   9.2x |
+| emoji |   170 |           12.2 |          83.0 |   6.8x |
+| mixed |   144 |            6.9 |          77.8 |  11.3x |
 
 ### Windows x86_64
 
+CPU: AMD EPYC 7763 64-Core Processor
+
 | Input | Bytes | SIMD (ns/iter) | std (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------:|--------:|
-| ascii |   169 |           28.3 |          90.9 |   3.2x |
-| cjk   |   194 |           12.2 |         107.1 |   8.8x |
-| emoji |   170 |           13.9 |          95.9 |   6.9x |
-| mixed |   144 |            8.6 |          85.2 |   9.9x |
+| ascii |   169 |           14.2 |          86.5 |   6.1x |
+| cjk   |   194 |           10.5 |         106.1 |  10.1x |
+| emoji |   170 |           14.2 |          91.0 |   6.4x |
+| mixed |   144 |            8.7 |          80.7 |   9.3x |
 
 ## License
 
