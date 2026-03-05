@@ -37,3 +37,93 @@ pub use wasm32::utf16_len;
     all(target_arch = "wasm32", target_feature = "simd128"),
 )))]
 pub use scalar::utf16_len;
+
+#[cfg(test)]
+mod tests {
+    use super::utf16_len;
+
+    /// Reference implementation using the standard library.
+    fn reference(s: &str) -> usize {
+        s.encode_utf16().count()
+    }
+
+    #[test]
+    fn empty() {
+        assert_eq!(utf16_len(""), reference(""));
+    }
+
+    #[test]
+    fn ascii_only() {
+        assert_eq!(utf16_len("hello"), reference("hello"));
+    }
+
+    #[test]
+    fn two_byte_chars() {
+        // Latin, Cyrillic, etc.
+        let s = "café résumé";
+        assert_eq!(utf16_len(s), reference(s));
+    }
+
+    #[test]
+    fn three_byte_chars() {
+        // CJK characters (U+4E00..U+9FFF)
+        let s = "你好世界";
+        assert_eq!(utf16_len(s), reference(s));
+    }
+
+    #[test]
+    fn four_byte_chars() {
+        // Emoji / supplementary plane (surrogate pairs in UTF-16)
+        let s = "😀🎉🚀💯";
+        assert_eq!(utf16_len(s), reference(s));
+    }
+
+    #[test]
+    fn mixed() {
+        let s = "Hello, 世界! 🌍🌎🌏 café";
+        assert_eq!(utf16_len(s), reference(s));
+    }
+
+    #[test]
+    fn single_char_boundaries() {
+        // One character of each UTF-8 width
+        for c in ['a', 'é', '中', '🦀'] {
+            let s = String::from(c);
+            assert_eq!(utf16_len(&s), reference(&s), "char: {c}");
+        }
+    }
+
+    #[test]
+    fn longer_than_simd_width() {
+        // Ensure the SIMD loop and scalar tail both work (> 16 bytes).
+        let s = "abcdefghijklmnopqrstuvwxyz";
+        assert_eq!(utf16_len(s), reference(s));
+
+        let s = "αβγδεζηθικλμνξοπρστυφχψω";
+        assert_eq!(utf16_len(s), reference(s));
+
+        let s = "你好世界你好世界你好世界你好世界";
+        assert_eq!(utf16_len(s), reference(s));
+
+        let s = "🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀";
+        assert_eq!(utf16_len(s), reference(s));
+    }
+
+    #[test]
+    fn repeated_pattern_large() {
+        // Stress test: exceed the 255-iteration batch boundary (255 * 16 = 4080 bytes).
+        let s = "a".repeat(5000);
+        assert_eq!(utf16_len(&s), reference(&s));
+
+        let s = "🦀".repeat(1500); // 1500 * 4 = 6000 bytes
+        assert_eq!(utf16_len(&s), reference(&s));
+    }
+
+    #[test]
+    fn all_byte_widths_interleaved() {
+        // Repeating pattern of 1+2+3+4 byte chars to test alignment variations.
+        let pattern = "aé中🦀";
+        let s = pattern.repeat(100);
+        assert_eq!(utf16_len(&s), reference(&s));
+    }
+}
