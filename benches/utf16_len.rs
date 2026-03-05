@@ -20,10 +20,10 @@ fn bench_inputs(c: &mut Criterion) {
     let mut group = c.benchmark_group("utf16_len");
     for &(name, input) in inputs {
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
-            b.iter(|| black_box(utf16_len(input)));
+            b.iter(|| utf16_len(input));
         });
         group.bench_function(BenchmarkId::new(name, "std"), |b| {
-            b.iter(|| black_box(input.encode_utf16().count()));
+            b.iter(|| input.encode_utf16().count());
         });
     }
     group.finish();

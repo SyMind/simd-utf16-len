@@ -8,10 +8,17 @@
 
 /// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
 /// Stable replacement for the unstable `str::ceil_char_boundary`.
-#[inline]
+#[inline(always)]
 fn ceil_char_boundary(s: &str, i: usize) -> usize {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    if i >= len {
+        return len;
+    }
+    // Skip continuation bytes (0b10xx_xxxx) directly on the byte slice,
+    // avoiding repeated bounds checks and method-call overhead.
     let mut pos = i;
-    while pos < s.len() && !s.is_char_boundary(pos) {
+    while pos < len && (unsafe { *bytes.get_unchecked(pos) } & 0xC0) == 0x80 {
         pos += 1;
     }
     pos
