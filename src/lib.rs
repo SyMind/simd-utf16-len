@@ -6,6 +6,17 @@
 //! - continuation bytes: `(byte & 0xC0) == 0x80`
 //! - four-byte leaders: `byte >= 0xF0`
 
+/// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
+/// Stable replacement for the unstable `str::ceil_char_boundary`.
+#[inline]
+fn ceil_char_boundary(s: &str, i: usize) -> usize {
+    let mut pos = i;
+    while pos < s.len() && !s.is_char_boundary(pos) {
+        pos += 1;
+    }
+    pos
+}
+
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 

@@ -13,14 +13,13 @@ pub fn utf16_len(s: &str) -> usize {
     }
 
     // SAFETY: Feature detection ensures the correct SIMD path is used.
-    unsafe {
-        utf16_length_sse2(s.as_bytes())
-    }
+    unsafe { utf16_length_sse2(s) }
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
 #[inline]
-unsafe fn utf16_length_sse2(bytes: &[u8]) -> usize {
+unsafe fn utf16_length_sse2(s: &str) -> usize {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
@@ -65,11 +64,9 @@ unsafe fn utf16_length_sse2(bytes: &[u8]) -> usize {
         four_byte_count += _mm_cvtsi128_si64(sum) as usize;
     }
 
-    // Scalar tail for remaining bytes.
-    for &b in &bytes[i..] {
-        continuation_count += ((b & 0xC0) == 0x80) as usize;
-        four_byte_count += (b >= 0xF0) as usize;
-    }
-
-    len - continuation_count + four_byte_count
+    // Tail: find the next char boundary and use encode_utf16().count().
+    // Bytes between i and the char boundary are all continuation bytes,
+    // contributing 0 to UTF-16 length, so we can skip them.
+    let tail_start = crate::ceil_char_boundary(s, i);
+    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
 }
