@@ -16,17 +16,17 @@ pub fn utf16_len(s: &str) -> usize {
     // SAFETY: Feature detection ensures the correct SIMD path is used.
     unsafe {
         if std::is_x86_feature_detected!("avx2") {
-            utf16_length_avx2(s)
+            utf16_length_avx2(s.as_bytes())
         } else {
-            utf16_length_sse2(s)
+            utf16_length_sse2(s.as_bytes())
         }
     }
 }
 
 /// AVX2 implementation: processes 32 bytes per iteration.
 #[target_feature(enable = "avx2")]
-unsafe fn utf16_length_avx2(s: &str) -> usize {
-    let bytes = s.as_bytes();
+#[inline]
+unsafe fn utf16_length_avx2(bytes: &[u8]) -> usize {
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
@@ -66,12 +66,7 @@ unsafe fn utf16_length_avx2(s: &str) -> usize {
     }
 
     // Scalar tail for remaining bytes (up to 31).
-    for &b in &bytes[i..] {
-        continuation_count += ((b & 0xC0) == 0x80) as usize;
-        four_byte_count += (b >= 0xF0) as usize;
-    }
-
-    len - continuation_count + four_byte_count
+    len - continuation_count + four_byte_count + utf16_length_sse2(bytes[i..])
 }
 
 /// Horizontal sum of all u8 lanes in a __m256i register.
@@ -87,8 +82,8 @@ unsafe fn hsum_u8_avx2(v: __m256i, zero: __m256i) -> usize {
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
-unsafe fn utf16_length_sse2(s: &str) -> usize {
-    let bytes = s.as_bytes();
+#[inline]
+unsafe fn utf16_length_sse2(bytes: &[u8]) -> usize {
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
