@@ -6,22 +6,25 @@
 //! - continuation bytes: `(byte & 0xC0) == 0x80`
 //! - four-byte leaders: `byte >= 0xF0`
 
-/// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
-/// Stable replacement for the unstable `str::ceil_char_boundary`.
+/// Count continuation bytes and four-byte leaders in the scalar tail.
+///
+/// The UTF-16 length formula still works even when `i` is in the middle of a
+/// code point: skipped continuation bytes contribute 0 because they cancel out
+/// in `tail_len - continuation_bytes`.
 #[inline(always)]
-fn ceil_char_boundary(s: &str, i: usize) -> usize {
-    let bytes = s.as_bytes();
+fn scalar_tail_counts(bytes: &[u8], mut i: usize) -> (usize, usize) {
     let len = bytes.len();
-    if i >= len {
-        return len;
+    let mut continuation_count = 0usize;
+    let mut four_byte_count = 0usize;
+
+    while i < len {
+        let byte = unsafe { *bytes.get_unchecked(i) };
+        continuation_count += ((byte & 0xC0) == 0x80) as usize;
+        four_byte_count += (byte >= 0xF0) as usize;
+        i += 1;
     }
-    // Skip continuation bytes (0b10xx_xxxx) directly on the byte slice,
-    // avoiding repeated bounds checks and method-call overhead.
-    let mut pos = i;
-    while pos < len && (unsafe { *bytes.get_unchecked(pos) } & 0xC0) == 0x80 {
-        pos += 1;
-    }
-    pos
+
+    (continuation_count, four_byte_count)
 }
 
 #[cfg(target_arch = "x86_64")]

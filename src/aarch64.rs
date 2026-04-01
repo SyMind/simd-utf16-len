@@ -21,15 +21,14 @@ pub fn utf16_len(s: &str) -> usize {
         let cont_val = vdupq_n_u8(0x80);
         let four_threshold = vdupq_n_u8(0xEF);
         let one = vdupq_n_u8(1);
-
         // Process 16 bytes at a time, in batches of up to 255 iterations
         // to avoid u8 overflow in the per-lane accumulators.
         while i + 16 <= len {
-            let batch = ((len - i) / 16).min(255);
+            let mut remaining_chunks = ((len - i) / 16).min(255);
             let mut cont_acc = vdupq_n_u8(0);
             let mut four_acc = vdupq_n_u8(0);
 
-            for _ in 0..batch {
+            while remaining_chunks != 0 {
                 let chunk = vld1q_u8(bytes.as_ptr().add(i));
 
                 // Continuation bytes: (byte & 0xC0) == 0x80
@@ -39,14 +38,14 @@ pub fn utf16_len(s: &str) -> usize {
                 // subtracting -1 is adding 1.
                 cont_acc = vsubq_u8(cont_acc, is_cont);
 
-                // Four-byte leaders (byte >= 0xF0):
-                // saturating subtract 0xEF gives non-zero only for bytes >= 0xF0,
-                // then clamp to 1 with min.
+                // Four-byte leaders (byte >= 0xF0): saturating subtract 0xEF
+                // leaves 1..=16 only for matching bytes, then clamp to 1.
                 let sub = vqsubq_u8(chunk, four_threshold);
                 let is_four = vminq_u8(sub, one);
                 four_acc = vaddq_u8(four_acc, is_four);
 
                 i += 16;
+                remaining_chunks -= 1;
             }
 
             // Horizontal sum across all lanes.
@@ -55,9 +54,6 @@ pub fn utf16_len(s: &str) -> usize {
         }
     }
 
-    // Tail: find the next char boundary and use encode_utf16().count().
-    // Bytes between i and the char boundary are all continuation bytes,
-    // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(s, i);
-    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    let (tail_continuation_count, tail_four_byte_count) = crate::scalar_tail_counts(bytes, i);
+    len - (continuation_count + tail_continuation_count) + four_byte_count + tail_four_byte_count
 }
