@@ -144,4 +144,14 @@ mod tests {
         let s = pattern.repeat(100);
         assert_eq!(utf16_len(&s), reference(&s));
     }
+
+    #[test]
+    fn non_ascii_after_ascii_prefix() {
+        for prefix_len in [15, 16, 17, 31, 32, 33] {
+            for suffix in ["é", "中", "🦀", "é中🦀"] {
+                let s = "a".repeat(prefix_len) + suffix;
+                assert_eq!(utf16_len(&s), reference(&s), "prefix_len: {prefix_len}");
+            }
+        }
+    }
 }

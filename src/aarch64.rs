@@ -4,6 +4,7 @@ use std::arch::aarch64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 #[allow(unsafe_code)]
+#[inline]
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -13,10 +14,14 @@ pub fn utf16_len(s: &str) -> usize {
 
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
-    let mut i: usize = 0;
 
     // SAFETY: NEON is always available on aarch64.
     unsafe {
+        let mut i: usize = ascii_prefix_len_neon(bytes);
+        if i == len {
+            return len;
+        }
+
         let cont_mask = vdupq_n_u8(0xC0);
         let cont_val = vdupq_n_u8(0x80);
         let four_threshold = vdupq_n_u8(0xEF);
@@ -53,11 +58,41 @@ pub fn utf16_len(s: &str) -> usize {
             continuation_count += vaddlvq_u8(cont_acc) as usize;
             four_byte_count += vaddlvq_u8(four_acc) as usize;
         }
+
+        // Tail: find the next char boundary and use encode_utf16().count().
+        // Bytes between i and the char boundary are all continuation bytes,
+        // contributing 0 to UTF-16 length, so we can skip them.
+        let tail_start = crate::ceil_char_boundary(s, i);
+        i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    }
+}
+
+/// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
+/// the first 16-byte block (or tail) that may contain a non-ASCII byte.
+#[inline]
+fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
+    const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i + 16 <= len {
+        // SAFETY: i + 16 <= len is guaranteed by the while condition, and
+        // NEON is always available on aarch64.
+        let bits = unsafe {
+            let chunk = vld1q_u8(bytes.as_ptr().add(i));
+            let lanes = vreinterpretq_u64_u8(chunk);
+            vgetq_lane_u64::<0>(lanes) | vgetq_lane_u64::<1>(lanes)
+        };
+        if bits & HIGH_BITS != 0 {
+            return i;
+        }
+        i += 16;
     }
 
-    // Tail: find the next char boundary and use encode_utf16().count().
-    // Bytes between i and the char boundary are all continuation bytes,
-    // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(s, i);
-    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    if bytes[i..].is_ascii() {
+        len
+    } else {
+        i
+    }
 }
