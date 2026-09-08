@@ -42,21 +42,22 @@ fn utf16_length_sse2(s: &str) -> usize {
         let four_mask = _mm_set1_epi8(0xF0_u8 as i8);
         let zero = _mm_setzero_si128();
 
-        // Each byte contributes 0, 1, or 2 UTF-16 code units. At most 127
-        // iterations keep every u8 accumulator below 256.
+        // ASCII bytes and UTF-8 leaders contribute one unit, with one extra
+        // unit for four-byte leaders. Independent accumulators avoid a serial
+        // dependency between the two additions and allow 255 iterations.
         while i + 16 <= len {
-            let batch = ((len - i) / 16).min(127);
-            let batch_end = i + batch * 16;
-            let mut acc = zero;
-            while i < batch_end {
+            let batch = ((len - i) / 16).min(255);
+            let mut leader_acc = zero;
+            let mut four_acc = zero;
+            for _ in 0..batch {
                 let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
                 let is_leader = _mm_cmpgt_epi8(chunk, cont_max);
                 let is_four = _mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask);
-                acc = _mm_sub_epi8(acc, is_leader);
-                acc = _mm_sub_epi8(acc, is_four);
+                leader_acc = _mm_sub_epi8(leader_acc, is_leader);
+                four_acc = _mm_sub_epi8(four_acc, is_four);
                 i += 16;
             }
-            let sad = _mm_sad_epu8(acc, zero);
+            let sad = _mm_add_epi64(_mm_sad_epu8(leader_acc, zero), _mm_sad_epu8(four_acc, zero));
             let sum = _mm_add_epi64(sad, _mm_srli_si128::<8>(sad));
             count += _mm_cvtsi128_si64(sum) as usize;
         }
