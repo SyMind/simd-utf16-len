@@ -26,7 +26,7 @@ Where:
 - **Continuation bytes** (`(byte & 0xC0) == 0x80`) don't produce UTF-16 code units
 - **Four-byte leaders** (`byte >= 0xF0`) produce surrogate pairs (2 UTF-16 code units instead of 1)
 
-The SIMD implementations first scan for an ASCII prefix. Entirely ASCII strings return their byte length; otherwise, the verified prefix contributes its byte length and the remaining bytes are counted using 16-byte SIMD vectors. The x86_64 and aarch64 ASCII scans process 64-byte blocks in their bulk loops.
+The SIMD implementations first scan for an ASCII prefix. Entirely ASCII strings return their byte length; otherwise, the verified prefix contributes its byte length and the remaining bytes are counted using 16-byte SIMD vectors. The ASCII scans follow Rust 1.98.0's standard-library strategy: x86_64 uses 64-byte SSE2 blocks with a word-at-a-time path below 64 bytes, while aarch64 and wasm32 use aligned `usize` loads between unaligned first and last words.
 
 Call `utf16_len(s)` directly when the ASCII status is unknown. If the caller already guarantees or caches that a string is ASCII, `s.len()` remains an O(1) operation and avoids scanning altogether.
 
