@@ -44,8 +44,7 @@ fn utf16_length_sse2(s: &str) -> usize {
             let batch = ((len - i) / 16).min(255);
             let mut leader_acc = zero;
             let mut four_acc = zero;
-            let end = i + batch * 16;
-            while i < end {
+            for _ in 0..batch {
                 let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
                 let is_leader = _mm_cmpgt_epi8(chunk, cont_max);
                 let is_four = _mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask);
