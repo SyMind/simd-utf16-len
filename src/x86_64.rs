@@ -5,7 +5,6 @@
 use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
-#[allow(unsafe_code)]
 pub fn utf16_len(s: &str) -> usize {
     let len = s.len();
     if len < 16 {
@@ -19,7 +18,7 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
-#[inline]
+#[inline(always)]
 fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -88,7 +87,7 @@ fn utf16_length_sse2(s: &str) -> usize {
 
 /// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
 /// the first block (or tail) that may contain a non-ASCII byte.
-#[inline]
+#[inline(always)]
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     let len = bytes.len();
     // SAFETY: the public entry handles inputs shorter than 16 bytes.

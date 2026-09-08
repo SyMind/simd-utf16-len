@@ -3,7 +3,6 @@
 use std::arch::aarch64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
-#[allow(unsafe_code)]
 pub fn utf16_len(s: &str) -> usize {
     let start = ascii_prefix_len_neon(s.as_bytes());
     if start == s.len() {
@@ -14,6 +13,7 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
+#[inline(always)]
 fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -70,7 +70,7 @@ fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
 
 /// Return the string length for ASCII, or the start of the first 64-byte
 /// block (or tail) containing a non-ASCII byte. Earlier bytes need no counting.
-#[inline]
+#[inline(always)]
 fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
     let len = bytes.len();
     let mut i = 0;

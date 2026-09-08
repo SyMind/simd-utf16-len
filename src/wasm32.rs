@@ -3,7 +3,6 @@
 use std::arch::wasm32::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using WASM SIMD128.
-#[allow(unsafe_code)]
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -64,7 +63,7 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// Horizontal sum of all u8 lanes in a v128 register.
-#[inline]
+#[inline(always)]
 fn horizontal_sum_u8(v: v128) -> usize {
     // u8x16 -> i16x8 (pairwise add adjacent u8 lanes)
     let pairs = i16x8_extadd_pairwise_u8x16(v);
@@ -79,7 +78,7 @@ fn horizontal_sum_u8(v: v128) -> usize {
 
 /// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
 /// the first 16-byte block (or tail) that may contain a non-ASCII byte.
-#[inline]
+#[inline(always)]
 fn ascii_prefix_len_simd128(bytes: &[u8]) -> usize {
     let len = bytes.len();
     let mut i = 0;
