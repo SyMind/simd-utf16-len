@@ -42,6 +42,13 @@ fn print_env_info() {
     println!("| Item | Value |");
     println!("|------|-------|");
 
+    let build = if cfg!(debug_assertions) {
+        "debug (use --release for benchmarking)"
+    } else {
+        "release"
+    };
+    println!("| Build | {build} |");
+
     // OS
     println!(
         "| OS | {} {} |",
@@ -87,12 +94,20 @@ fn get_cpu_model() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"])
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_Processor).Name",
+            ])
             .output()
             .ok()?;
         let text = String::from_utf8(output.stdout).ok()?;
         let trimmed = text.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -110,15 +125,22 @@ fn main() {
         ("mixed", MIXED),
     ];
 
-    println!("## Benchmark: SIMD vs std `encode_utf16().count()`\n");
+    println!("## Benchmark: SIMD vs std `is_ascii() + len()` with UTF-16 fallback\n");
     println!("| Input | Bytes | SIMD (ns/iter) | std (ns/iter) | Speedup |");
     println!("|-------|------:|---------------:|--------------:|--------:|");
 
     let mut all_passed = true;
 
     for &(name, input) in inputs {
-        let simd_dur = bench(|| utf16_len(input));
-        let std_dur = bench(|| input.encode_utf16().count());
+        let simd_dur = bench(|| utf16_len(black_box(input)));
+        let std_dur = bench(|| {
+            let input = black_box(input);
+            if input.is_ascii() {
+                input.len()
+            } else {
+                input.encode_utf16().count()
+            }
+        });
 
         let simd_ns = simd_dur.as_nanos() as f64 / BENCH_ITERS as f64;
         let std_ns = std_dur.as_nanos() as f64 / BENCH_ITERS as f64;

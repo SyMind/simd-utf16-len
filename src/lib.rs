@@ -6,6 +6,10 @@
 //! - continuation bytes: `(byte & 0xC0) == 0x80`
 //! - four-byte leaders: `byte >= 0xF0`
 
+#[cfg(any(
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
 /// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
 /// Stable replacement for the unstable `str::ceil_char_boundary`.
 #[inline(always)]
@@ -34,7 +38,6 @@ mod aarch64;
 mod wasm32;
 
 #[cfg(not(any(
-    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 )))]
@@ -73,6 +76,15 @@ mod tests {
     #[test]
     fn ascii_only() {
         assert_eq!(utf16_len("hello"), reference("hello"));
+        // Include both ends of the ASCII range and unaligned slice starts.
+        let bytes: Vec<u8> = (0..272).map(|i| (i % 128) as u8).collect();
+        let input = String::from_utf8(bytes).unwrap();
+        for offset in 0..16 {
+            for len in 0..=256 {
+                let s = &input[offset..offset + len];
+                assert_eq!(utf16_len(s), len, "offset: {offset}, len: {len}");
+            }
+        }
     }
 
     #[test]
@@ -143,5 +155,27 @@ mod tests {
         let pattern = "aé中🦀";
         let s = pattern.repeat(100);
         assert_eq!(utf16_len(&s), reference(&s));
+    }
+
+    #[test]
+    fn non_ascii_after_ascii_prefix() {
+        for prefix_len in (0..=129).chain([2031, 2032, 2033, 4079, 4080, 4081, 4095, 4096, 4097]) {
+            for suffix in [
+                "é",
+                "中",
+                "🦀",
+                "é中🦀",
+                "\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}",
+            ] {
+                for tail_len in [0, 1, 15, 16, 63, 64, 65] {
+                    let s = "a".repeat(prefix_len) + suffix + &"a".repeat(tail_len);
+                    assert_eq!(
+                        utf16_len(&s),
+                        reference(&s),
+                        "prefix_len: {prefix_len}, tail_len: {tail_len}, suffix: {suffix}"
+                    );
+                }
+            }
+        }
     }
 }

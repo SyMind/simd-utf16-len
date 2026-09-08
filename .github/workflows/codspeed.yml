@@ -6,6 +6,14 @@ on:
       - "main"
   pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: CodSpeed measurement mode
+        type: choice
+        options:
+          - simulation
+          - walltime
+        default: simulation
 
 permissions:
   contents: read
@@ -22,11 +30,11 @@ jobs:
         with:
           channel: stable
           cache-target: release
-          bins: cargo-codspeed
+          bins: cargo-codspeed@4.7.0
       - name: Build the benchmark target(s)
-        run: cargo codspeed build
+        run: cargo codspeed build -m "${{ inputs.mode || 'simulation' }}"
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          mode: simulation
+          mode: ${{ inputs.mode || 'simulation' }}
           run: cargo codspeed run
