@@ -4,6 +4,7 @@ use std::arch::wasm32::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using WASM SIMD128.
 #[allow(unsafe_code)]
+#[inline]
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -13,7 +14,10 @@ pub fn utf16_len(s: &str) -> usize {
 
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
-    let mut i: usize = 0;
+    let mut i: usize = ascii_prefix_len_simd128(bytes);
+    if i == len {
+        return len;
+    }
 
     let cont_mask = u8x16_splat(0xC0);
     let cont_val = u8x16_splat(0x80);
@@ -72,4 +76,23 @@ fn horizontal_sum_u8(v: v128) -> usize {
         + i32x4_extract_lane::<1>(quads)
         + i32x4_extract_lane::<2>(quads)
         + i32x4_extract_lane::<3>(quads)) as usize
+}
+
+/// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
+/// the first 16-byte block (or tail) that may contain a non-ASCII byte.
+#[inline]
+fn ascii_prefix_len_simd128(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i + 16 <= len {
+        // SAFETY: i + 16 <= len is guaranteed by the while condition.
+        let high_bits = unsafe { i8x16_bitmask(v128_load(bytes.as_ptr().add(i) as *const v128)) };
+        if high_bits != 0 {
+            return i;
+        }
+        i += 16;
+    }
+
+    if bytes[i..].is_ascii() { len } else { i }
 }

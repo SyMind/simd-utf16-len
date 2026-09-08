@@ -87,12 +87,20 @@ fn get_cpu_model() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"])
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_Processor).Name",
+            ])
             .output()
             .ok()?;
         let text = String::from_utf8(output.stdout).ok()?;
         let trimmed = text.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -117,8 +125,8 @@ fn main() {
     let mut all_passed = true;
 
     for &(name, input) in inputs {
-        let simd_dur = bench(|| utf16_len(input));
-        let std_dur = bench(|| input.encode_utf16().count());
+        let simd_dur = bench(|| utf16_len(black_box(input)));
+        let std_dur = bench(|| black_box(input).encode_utf16().count());
 
         let simd_ns = simd_dur.as_nanos() as f64 / BENCH_ITERS as f64;
         let std_ns = std_dur.as_nanos() as f64 / BENCH_ITERS as f64;

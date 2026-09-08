@@ -9,7 +9,7 @@ repository = "https://github.com/SyMind/simd-utf16-len"
 [dependencies]
 
 [dev-dependencies]
-criterion = { package = "codspeed-criterion-compat", version = "2.7" }
+criterion = { package = "codspeed-criterion-compat", version = "4.7" }
 
 [[bench]]
 name = "utf16_len"
