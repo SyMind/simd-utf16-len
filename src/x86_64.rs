@@ -93,7 +93,30 @@ fn utf16_length_sse2(s: &str) -> usize {
 #[inline]
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     let len = bytes.len();
-    let mut i = 0;
+    // SAFETY: the public entry handles inputs shorter than 16 bytes.
+    // Check the first block separately so non-ASCII text avoids the bulk scan.
+    let first = unsafe { _mm_loadu_si128(bytes.as_ptr() as *const __m128i) };
+    if unsafe { _mm_movemask_epi8(first) } != 0 {
+        return 0;
+    }
+    let mut i = 16;
+
+    while i + 64 <= len {
+        // SAFETY: all four loads are within the slice. OR preserves the high
+        // bit of every byte, so a single movemask checks the entire block.
+        let high_bits = unsafe {
+            let ptr = bytes.as_ptr().add(i);
+            let a = _mm_loadu_si128(ptr as *const __m128i);
+            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
+            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
+            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
+            _mm_movemask_epi8(_mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d)))
+        };
+        if high_bits != 0 {
+            return i;
+        }
+        i += 64;
+    }
 
     while i + 16 <= len {
         // SAFETY: i + 16 <= len is guaranteed by the while condition, and
