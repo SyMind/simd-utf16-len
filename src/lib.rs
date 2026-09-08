@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn non_ascii_after_ascii_prefix() {
-        for prefix_len in (0..=129).chain([4079, 4080, 4081, 4095, 4096, 4097]) {
+        for prefix_len in (0..=129).chain([2031, 2032, 2033, 4079, 4080, 4081, 4095, 4096, 4097]) {
             for suffix in [
                 "é",
                 "中",

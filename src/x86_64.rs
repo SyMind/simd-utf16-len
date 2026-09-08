@@ -9,67 +9,49 @@ use std::arch::x86_64::*;
 // Keep the SIMD loops shared across call sites, including with LTO.
 #[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
-    let start = ascii_prefix_len_sse2(s.as_bytes());
-    if start == s.len() {
-        start
-    } else if start == 0 {
-        utf16_length_sse2(s)
-    } else {
-        // SAFETY: every byte before start was checked to be ASCII, so start
-        // is in bounds and lies on a UTF-8 character boundary.
-        start + utf16_length_sse2(unsafe { s.get_unchecked(start..) })
+    let len = s.len();
+    if len == 0 {
+        return 0;
     }
+
+    utf16_length_sse2(s)
 }
 
-/// Count the remaining bytes after an already checked ASCII prefix.
-#[inline(never)]
+/// SSE2 implementation: processes 16 bytes per iteration.
+#[inline]
 fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
-    let mut continuation_count: usize = 0;
-    let mut four_byte_count: usize = 0;
-    let mut i: usize = 0;
+    let mut i: usize = ascii_prefix_len_sse2(bytes);
+    if i == len {
+        return len;
+    }
+
+    let mut count = i;
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by
     // `i + 16 <= len`.
     unsafe {
-        let cont_mask = _mm_set1_epi8(0xC0_u8 as i8);
-        let cont_val = _mm_set1_epi8(0x80_u8 as i8);
-        let four_threshold = _mm_set1_epi8(0xEF_u8 as i8);
-        let ones = _mm_set1_epi8(1);
+        let cont_max = _mm_set1_epi8(0xBF_u8 as i8);
+        let four_mask = _mm_set1_epi8(0xF0_u8 as i8);
         let zero = _mm_setzero_si128();
 
-        // Process 16 bytes at a time, in batches of up to 255 iterations
-        // to avoid u8 overflow in the per-lane accumulators.
+        // Each byte contributes 0, 1, or 2 UTF-16 code units. At most 127
+        // iterations keep every u8 accumulator below 256.
         while i + 16 <= len {
-            let batch = ((len - i) / 16).min(255);
-            let mut cont_acc = zero;
-            let mut four_acc = zero;
-
+            let batch = ((len - i) / 16).min(127);
+            let mut acc = zero;
             for _ in 0..batch {
                 let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
-
-                let masked = _mm_and_si128(chunk, cont_mask);
-                let is_cont = _mm_cmpeq_epi8(masked, cont_val);
-                cont_acc = _mm_sub_epi8(cont_acc, is_cont);
-
-                let sub = _mm_subs_epu8(chunk, four_threshold);
-                let is_four = _mm_min_epu8(sub, ones);
-                four_acc = _mm_add_epi8(four_acc, is_four);
-
+                let is_leader = _mm_cmpgt_epi8(chunk, cont_max);
+                let is_four = _mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask);
+                acc = _mm_sub_epi8(acc, is_leader);
+                acc = _mm_sub_epi8(acc, is_four);
                 i += 16;
             }
-
-            // Horizontal sum via SAD (Sum of Absolute Differences) against zero.
-            let cont_sad = _mm_sad_epu8(cont_acc, zero);
-            let high = _mm_srli_si128::<8>(cont_sad);
-            let sum = _mm_add_epi64(cont_sad, high);
-            continuation_count += _mm_cvtsi128_si64(sum) as usize;
-
-            let four_sad = _mm_sad_epu8(four_acc, zero);
-            let high = _mm_srli_si128::<8>(four_sad);
-            let sum = _mm_add_epi64(four_sad, high);
-            four_byte_count += _mm_cvtsi128_si64(sum) as usize;
+            let sad = _mm_sad_epu8(acc, zero);
+            let sum = _mm_add_epi64(sad, _mm_srli_si128::<8>(sad));
+            count += _mm_cvtsi128_si64(sum) as usize;
         }
     }
 
@@ -77,7 +59,7 @@ fn utf16_length_sse2(s: &str) -> usize {
     // Bytes between i and the char boundary are all continuation bytes,
     // contributing 0 to UTF-16 length, so we can skip them.
     let tail_start = crate::ceil_char_boundary(s, i);
-    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    count + s[tail_start..].encode_utf16().count()
 }
 
 /// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
