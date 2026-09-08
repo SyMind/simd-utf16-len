@@ -38,7 +38,6 @@ mod aarch64;
 mod wasm32;
 
 #[cfg(not(any(
-    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 )))]
