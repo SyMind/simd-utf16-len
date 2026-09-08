@@ -97,26 +97,17 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     if first & 0x8080_8080_8080_8080 != 0 {
         return 0;
     }
-    let mut i = bytes.as_ptr().align_offset(16);
-    if i > 8 {
-        // SAFETY: len >= 16. Check the rest of the prefix before advancing
-        // to the first aligned vector; the initial probe covered bytes 0..8.
-        let second = unsafe { bytes.as_ptr().add(8).cast::<u64>().read_unaligned() };
-        if second & 0x8080_8080_8080_8080 != 0 {
-            return 8;
-        }
-    }
+    let mut i = 8;
 
     while i + 64 <= len {
-        // SAFETY: i starts at a 16-byte-aligned address and advances by
-        // multiples of 16. All four loads are within the slice. OR preserves
-        // the high bit of every byte, so one movemask checks the entire block.
+        // SAFETY: all four loads are within the slice. OR preserves the high
+        // bit of every byte, so a single movemask checks the entire block.
         let high_bits = unsafe {
             let ptr = bytes.as_ptr().add(i);
-            let a = _mm_load_si128(ptr as *const __m128i);
-            let b = _mm_load_si128(ptr.add(16) as *const __m128i);
-            let c = _mm_load_si128(ptr.add(32) as *const __m128i);
-            let d = _mm_load_si128(ptr.add(48) as *const __m128i);
+            let a = _mm_loadu_si128(ptr as *const __m128i);
+            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
+            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
+            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
             _mm_movemask_epi8(_mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d)))
         };
         if high_bits != 0 {
@@ -126,10 +117,10 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     }
 
     while i + 16 <= len {
-        // SAFETY: i + 16 <= len is guaranteed by the while condition, the
-        // pointer remains 16-byte aligned, and SSE2 is available on x86_64.
+        // SAFETY: i + 16 <= len is guaranteed by the while condition, and
+        // SSE2 is always available on x86_64.
         let high_bits =
-            unsafe { _mm_movemask_epi8(_mm_load_si128(bytes.as_ptr().add(i) as *const __m128i)) };
+            unsafe { _mm_movemask_epi8(_mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i)) };
         if high_bits != 0 {
             return i;
         }
