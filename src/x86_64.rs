@@ -97,7 +97,30 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     if first & 0x8080_8080_8080_8080 != 0 {
         return 0;
     }
-    let mut i = 8;
+    let (chunks, tail) = bytes.as_chunks::<128>();
+    for chunk in chunks {
+        // SAFETY: chunk contains 128 bytes and SSE2 is available on x86_64.
+        // OR preserves every high bit, so one movemask checks all eight vectors.
+        let high_bits = unsafe {
+            let ptr = chunk.as_ptr();
+            let a = _mm_loadu_si128(ptr as *const __m128i);
+            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
+            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
+            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
+            let e = _mm_loadu_si128(ptr.add(64) as *const __m128i);
+            let f = _mm_loadu_si128(ptr.add(80) as *const __m128i);
+            let g = _mm_loadu_si128(ptr.add(96) as *const __m128i);
+            let h = _mm_loadu_si128(ptr.add(112) as *const __m128i);
+            let first = _mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d));
+            let second = _mm_or_si128(_mm_or_si128(e, f), _mm_or_si128(g, h));
+            _mm_movemask_epi8(_mm_or_si128(first, second))
+        };
+        if high_bits != 0 {
+            // SAFETY: chunk starts within the same allocation as bytes.
+            return unsafe { chunk.as_ptr().offset_from_unsigned(bytes.as_ptr()) };
+        }
+    }
+    let mut i = len - tail.len();
 
     while i + 64 <= len {
         // SAFETY: all four loads are within the slice. OR preserves the high
