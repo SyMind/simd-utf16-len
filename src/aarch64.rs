@@ -16,7 +16,7 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
-#[inline]
+#[inline(never)]
 fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -77,6 +77,13 @@ fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
 fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
     let len = bytes.len();
     let mut i = 0;
+    if len >= 16 {
+        // SAFETY: the first vector lies within the slice.
+        if unsafe { vmaxvq_u8(vld1q_u8(bytes.as_ptr())) } >= 0x80 {
+            return 0;
+        }
+        i = 16;
+    }
 
     while i + 64 <= len {
         // SAFETY: all four loads are within the slice, and NEON is available
