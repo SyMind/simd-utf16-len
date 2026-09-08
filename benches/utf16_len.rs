@@ -21,7 +21,6 @@ fn ascii_guard_len(s: &str) -> usize {
 fn bench_inputs(c: &mut Criterion) {
     let ascii_long = ASCII.repeat(64);
     let inputs: &[(&str, &str)] = &[
-        ("ascii", ASCII),
         ("ascii_long", ascii_long.as_str()),
         ("cjk", CJK),
         ("emoji", EMOJI),
