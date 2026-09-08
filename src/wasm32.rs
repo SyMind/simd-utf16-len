@@ -4,8 +4,6 @@ use std::arch::wasm32::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using WASM SIMD128.
 #[allow(unsafe_code)]
-// Keep the SIMD loops shared across call sites, including with LTO.
-#[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();

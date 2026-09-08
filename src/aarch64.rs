@@ -4,8 +4,6 @@ use std::arch::aarch64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 #[allow(unsafe_code)]
-// Keep the SIMD loops shared across call sites, including with LTO.
-#[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
     let start = ascii_prefix_len_neon(s.as_bytes());
     if start == s.len() {
@@ -16,7 +14,6 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
-#[inline(never)]
 fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
