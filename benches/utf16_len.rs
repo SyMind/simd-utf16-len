@@ -29,6 +29,12 @@ fn bench_inputs(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("utf16_len");
     for &(name, input) in inputs {
+        group.bench_function(BenchmarkId::new(name, "zero_start"), |b| {
+            b.iter(|| simd_utf16_zero_start::utf16_len(black_box(input)));
+        });
+        group.bench_function(BenchmarkId::new(name, "baseline"), |b| {
+            b.iter(|| simd_utf16_baseline::utf16_len(black_box(input)));
+        });
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
             b.iter(|| utf16_len(black_box(input)));
         });
