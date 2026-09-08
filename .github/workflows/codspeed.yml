@@ -11,9 +11,9 @@ on:
         description: CodSpeed measurement mode
         type: choice
         options:
-          - simulation
           - walltime
-        default: simulation
+          - simulation
+        default: walltime
 
 permissions:
   contents: read
@@ -32,9 +32,9 @@ jobs:
           cache-target: release
           bins: cargo-codspeed@4.7.0
       - name: Build the benchmark target(s)
-        run: cargo codspeed build -m "${{ inputs.mode || 'simulation' }}"
+        run: cargo codspeed build -m "${{ inputs.mode || 'walltime' }}"
       - name: Run the benchmarks
         uses: CodSpeedHQ/action@v4
         with:
-          mode: ${{ inputs.mode || 'simulation' }}
+          mode: ${{ inputs.mode || 'walltime' }}
           run: cargo codspeed run
