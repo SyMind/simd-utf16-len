@@ -7,6 +7,13 @@
 //! - four-byte leaders: `byte >= 0xF0`
 
 #[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+mod ascii;
+
+#[cfg(any(
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -168,12 +175,18 @@ mod tests {
                 "\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}",
             ] {
                 for tail_len in [0, 1, 15, 16, 63, 64, 65] {
-                    let s = "a".repeat(prefix_len) + suffix + &"a".repeat(tail_len);
-                    assert_eq!(
-                        utf16_len(&s),
-                        reference(&s),
-                        "prefix_len: {prefix_len}, tail_len: {tail_len}, suffix: {suffix}"
-                    );
+                    // Exercise aligned word loads and overlapping tails from
+                    // every possible 16-byte slice alignment.
+                    for offset in 0..16 {
+                        let storage =
+                            "a".repeat(offset + prefix_len) + suffix + &"a".repeat(tail_len);
+                        let s = &storage[offset..];
+                        assert_eq!(
+                            utf16_len(s),
+                            reference(s),
+                            "offset: {offset}, prefix_len: {prefix_len}, tail_len: {tail_len}, suffix: {suffix}"
+                        );
+                    }
                 }
             }
         }

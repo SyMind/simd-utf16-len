@@ -22,7 +22,7 @@ pub fn utf16_len(s: &str) -> usize {
 fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
-    let mut i: usize = ascii_prefix_len_sse2(bytes);
+    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
     if i == len {
         return len;
     }
@@ -83,78 +83,4 @@ fn utf16_length_sse2(s: &str) -> usize {
         }
     }
     count
-}
-
-/// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
-/// the first block (or tail) that may contain a non-ASCII byte.
-#[inline(always)]
-fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
-    let len = bytes.len();
-    // SAFETY: the public entry handles inputs shorter than 16 bytes.
-    // A word-sized probe rejects early non-ASCII bytes without a vector-to-
-    // integer transfer before the counting loop.
-    let first = unsafe { bytes.as_ptr().cast::<u64>().read_unaligned() };
-    if first & 0x8080_8080_8080_8080 != 0 {
-        return 0;
-    }
-    let (chunks, tail) = bytes.as_chunks::<128>();
-    for chunk in chunks {
-        // SAFETY: chunk contains 128 bytes and SSE2 is available on x86_64.
-        // OR preserves every high bit, so one movemask checks all eight vectors.
-        let high_bits = unsafe {
-            let ptr = chunk.as_ptr();
-            let a = _mm_loadu_si128(ptr as *const __m128i);
-            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
-            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
-            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
-            let e = _mm_loadu_si128(ptr.add(64) as *const __m128i);
-            let f = _mm_loadu_si128(ptr.add(80) as *const __m128i);
-            let g = _mm_loadu_si128(ptr.add(96) as *const __m128i);
-            let h = _mm_loadu_si128(ptr.add(112) as *const __m128i);
-            let first = _mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d));
-            let second = _mm_or_si128(_mm_or_si128(e, f), _mm_or_si128(g, h));
-            _mm_movemask_epi8(_mm_or_si128(first, second))
-        };
-        if high_bits != 0 {
-            // SAFETY: chunk starts within the same allocation as bytes.
-            return unsafe { chunk.as_ptr().offset_from_unsigned(bytes.as_ptr()) };
-        }
-    }
-    let mut i = len - tail.len();
-
-    while i + 64 <= len {
-        // SAFETY: all four loads are within the slice. OR preserves the high
-        // bit of every byte, so a single movemask checks the entire block.
-        let high_bits = unsafe {
-            let ptr = bytes.as_ptr().add(i);
-            let a = _mm_loadu_si128(ptr as *const __m128i);
-            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
-            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
-            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
-            _mm_movemask_epi8(_mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d)))
-        };
-        if high_bits != 0 {
-            return i;
-        }
-        i += 64;
-    }
-
-    while i + 16 <= len {
-        // SAFETY: i + 16 <= len is guaranteed by the while condition, and
-        // SSE2 is always available on x86_64.
-        let high_bits =
-            unsafe { _mm_movemask_epi8(_mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i)) };
-        if high_bits != 0 {
-            return i;
-        }
-        i += 16;
-    }
-
-    // SAFETY: the initial probe requires len >= 16, and every increment
-    // follows a successful in-bounds block check, so i <= len.
-    if unsafe { bytes.get_unchecked(i..) }.is_ascii() {
-        len
-    } else {
-        i
-    }
 }

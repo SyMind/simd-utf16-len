@@ -36,9 +36,6 @@ fn bench_inputs(c: &mut Criterion) {
             b.iter(|| utf16_len(black_box(input)));
         });
         if name == "ascii" {
-            group.bench_function(BenchmarkId::new(name, "zero_start"), |b| {
-                b.iter(|| simd_utf16_zero_start::utf16_len(black_box(input)));
-            });
             group.bench_function(BenchmarkId::new(name, "is_ascii"), |b| {
                 b.iter(|| ascii_guard_len(black_box(input)));
             });
