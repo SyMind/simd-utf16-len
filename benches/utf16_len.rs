@@ -19,9 +19,9 @@ fn ascii_guard_len(s: &str) -> usize {
 }
 
 fn bench_inputs(c: &mut Criterion) {
-    let ascii_long = ASCII.repeat(64);
+    let ascii = ASCII.repeat(64);
     let inputs: &[(&str, &str)] = &[
-        ("ascii_long", ascii_long.as_str()),
+        ("ascii", ascii.as_str()),
         ("cjk", CJK),
         ("emoji", EMOJI),
         ("mixed", MIXED),
@@ -35,7 +35,7 @@ fn bench_inputs(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "encode_utf16"), |b| {
             b.iter(|| black_box(input).encode_utf16().count());
         });
-        if name.starts_with("ascii") {
+        if name == "ascii" {
             group.bench_function(BenchmarkId::new(name, "is_ascii"), |b| {
                 b.iter(|| ascii_guard_len(black_box(input)));
             });
