@@ -42,6 +42,13 @@ fn print_env_info() {
     println!("| Item | Value |");
     println!("|------|-------|");
 
+    let build = if cfg!(debug_assertions) {
+        "debug (use --release for benchmarking)"
+    } else {
+        "release"
+    };
+    println!("| Build | {build} |");
+
     // OS
     println!(
         "| OS | {} {} |",
@@ -118,7 +125,7 @@ fn main() {
         ("mixed", MIXED),
     ];
 
-    println!("## Benchmark: SIMD vs std `encode_utf16().count()`\n");
+    println!("## Benchmark: SIMD vs std `is_ascii() + len()` with UTF-16 fallback\n");
     println!("| Input | Bytes | SIMD (ns/iter) | std (ns/iter) | Speedup |");
     println!("|-------|------:|---------------:|--------------:|--------:|");
 
@@ -126,7 +133,14 @@ fn main() {
 
     for &(name, input) in inputs {
         let simd_dur = bench(|| utf16_len(black_box(input)));
-        let std_dur = bench(|| black_box(input).encode_utf16().count());
+        let std_dur = bench(|| {
+            let input = black_box(input);
+            if input.is_ascii() {
+                input.len()
+            } else {
+                input.encode_utf16().count()
+            }
+        });
 
         let simd_ns = simd_dur.as_nanos() as f64 / BENCH_ITERS as f64;
         let std_ns = std_dur.as_nanos() as f64 / BENCH_ITERS as f64;
