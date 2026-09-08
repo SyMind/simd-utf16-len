@@ -16,7 +16,7 @@ pub fn utf16_len(s: &str) -> usize {
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
-#[inline(never)]
+#[inline]
 fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
