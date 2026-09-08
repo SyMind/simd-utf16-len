@@ -7,7 +7,6 @@
 //! - four-byte leaders: `byte >= 0xF0`
 
 #[cfg(any(
-    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
