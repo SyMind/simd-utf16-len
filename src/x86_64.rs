@@ -6,7 +6,8 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 #[allow(unsafe_code)]
-#[inline]
+// Keep the SIMD loops shared across call sites, including with LTO.
+#[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
     let len = s.len();
     if len == 0 {
