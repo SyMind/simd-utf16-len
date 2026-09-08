@@ -12,18 +12,23 @@ pub fn utf16_len(s: &str) -> usize {
     let start = ascii_prefix_len_sse2(s.as_bytes());
     if start == s.len() {
         start
+    } else if start == 0 {
+        utf16_length_sse2(s)
     } else {
-        utf16_length_sse2(s, start)
+        // SAFETY: every byte before start was checked to be ASCII, so start
+        // is in bounds and lies on a UTF-8 character boundary.
+        start + utf16_length_sse2(unsafe { s.get_unchecked(start..) })
     }
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
 #[inline(never)]
-fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
+fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
+    let mut i: usize = 0;
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by
     // `i + 16 <= len`.
