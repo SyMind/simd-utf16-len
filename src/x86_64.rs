@@ -61,7 +61,9 @@ fn utf16_length_sse2(s: &str) -> usize {
     if len - i < 4 {
         // A complete four-byte character cannot start in the final three
         // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
-        count += bytes[i..]
+        // SAFETY: i starts within the slice and only advances across full
+        // in-bounds vectors, so the remaining slice is valid.
+        count += unsafe { bytes.get_unchecked(i..) }
             .iter()
             .filter(|&&byte| (byte as i8) > -65)
             .count();
@@ -85,7 +87,7 @@ fn utf16_length_sse2(s: &str) -> usize {
 }
 
 /// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
-/// the first 16-byte block (or tail) that may contain a non-ASCII byte.
+/// the first block (or tail) that may contain a non-ASCII byte.
 #[inline]
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     let len = bytes.len();
@@ -126,5 +128,11 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
         i += 16;
     }
 
-    if bytes[i..].is_ascii() { len } else { i }
+    // SAFETY: the initial probe requires len >= 16, and every increment
+    // follows a successful in-bounds block check, so i <= len.
+    if unsafe { bytes.get_unchecked(i..) }.is_ascii() {
+        len
+    } else {
+        i
+    }
 }
