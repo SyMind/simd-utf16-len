@@ -100,6 +100,29 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     }
     let mut i = 8;
 
+    while i + 128 <= len {
+        // SAFETY: all eight loads are within the slice. Combining two groups
+        // halves the number of movemask instructions and branches for long ASCII.
+        let high_bits = unsafe {
+            let ptr = bytes.as_ptr().add(i);
+            let a = _mm_loadu_si128(ptr as *const __m128i);
+            let b = _mm_loadu_si128(ptr.add(16) as *const __m128i);
+            let c = _mm_loadu_si128(ptr.add(32) as *const __m128i);
+            let d = _mm_loadu_si128(ptr.add(48) as *const __m128i);
+            let e = _mm_loadu_si128(ptr.add(64) as *const __m128i);
+            let f = _mm_loadu_si128(ptr.add(80) as *const __m128i);
+            let g = _mm_loadu_si128(ptr.add(96) as *const __m128i);
+            let h = _mm_loadu_si128(ptr.add(112) as *const __m128i);
+            let first = _mm_or_si128(_mm_or_si128(a, b), _mm_or_si128(c, d));
+            let second = _mm_or_si128(_mm_or_si128(e, f), _mm_or_si128(g, h));
+            _mm_movemask_epi8(_mm_or_si128(first, second))
+        };
+        if high_bits != 0 {
+            return i;
+        }
+        i += 128;
+    }
+
     while i + 64 <= len {
         // SAFETY: all four loads are within the slice. OR preserves the high
         // bit of every byte, so a single movemask checks the entire block.
