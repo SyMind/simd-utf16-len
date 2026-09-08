@@ -33,8 +33,8 @@ fn bench_inputs(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
             b.iter(|| utf16_len(black_box(input)));
         });
-        group.bench_function(BenchmarkId::new(name, "encode_utf16"), |b| {
-            b.iter(|| black_box(input).encode_utf16().count());
+        group.bench_function(BenchmarkId::new(name, "main"), |b| {
+            b.iter(|| simd_utf16_main::utf16_len(black_box(input)));
         });
         if name.starts_with("ascii") {
             group.bench_function(BenchmarkId::new(name, "is_ascii"), |b| {
