@@ -11,6 +11,9 @@ use std::arch::x86_64::*;
 pub fn utf16_len(s: &str) -> usize {
     let len = s.len();
     if len < 16 {
+        if s.is_ascii() {
+            return len;
+        }
         // At most 15 bytes, so this accumulator cannot overflow.
         return s.bytes().fold(0u8, |count, byte| {
             count + u8::from((byte as i8) > -65) + u8::from(byte >= 0xF0)
