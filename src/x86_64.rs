@@ -9,25 +9,21 @@ use std::arch::x86_64::*;
 // Keep the SIMD loops shared across call sites, including with LTO.
 #[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
-    let len = s.len();
-    if len == 0 {
-        return 0;
+    let start = ascii_prefix_len_sse2(s.as_bytes());
+    if start == s.len() {
+        start
+    } else {
+        utf16_length_sse2(s, start)
     }
-
-    utf16_length_sse2(s)
 }
 
-/// SSE2 implementation: processes 16 bytes per iteration.
-#[inline]
-fn utf16_length_sse2(s: &str) -> usize {
+/// Count the remaining bytes after an already checked ASCII prefix.
+#[inline(never)]
+fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
-    let mut i: usize = ascii_prefix_len_sse2(bytes);
-    if i == len {
-        return len;
-    }
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by
     // `i + 16 <= len`.
