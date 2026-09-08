@@ -62,7 +62,14 @@ fn utf16_length_sse2(s: &str) -> usize {
         }
     }
 
-    if i < len {
+    if len - i < 4 {
+        // A complete four-byte character cannot start in the final three
+        // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
+        count += bytes[i..]
+            .iter()
+            .filter(|&&byte| (byte as i8) > -65)
+            .count();
+    } else {
         // SAFETY: the caller requires len >= 16. Reload the last full vector,
         // then discard mask bits for the bytes already counted by the loop.
         unsafe {
