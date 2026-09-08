@@ -95,12 +95,13 @@ fn utf16_length_sse2(s: &str) -> usize {
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     let len = bytes.len();
     // SAFETY: the public entry handles inputs shorter than 16 bytes.
-    // Check the first block separately so non-ASCII text avoids the bulk scan.
-    let first = unsafe { _mm_loadu_si128(bytes.as_ptr() as *const __m128i) };
-    if unsafe { _mm_movemask_epi8(first) } != 0 {
+    // A word-sized probe rejects early non-ASCII bytes without a vector-to-
+    // integer transfer before the counting loop.
+    let first = unsafe { bytes.as_ptr().cast::<u64>().read_unaligned() };
+    if first & 0x8080_8080_8080_8080 != 0 {
         return 0;
     }
-    let mut i = 16;
+    let mut i = 8;
 
     while i + 64 <= len {
         // SAFETY: all four loads are within the slice. OR preserves the high
