@@ -1,6 +1,6 @@
 [package]
 name = "simd-utf16-len"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "SIMD-accelerated UTF-16 length calculation from UTF-8 strings"
 license = "MIT"
