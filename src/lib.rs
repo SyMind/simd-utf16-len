@@ -6,6 +6,10 @@
 //! - continuation bytes: `(byte & 0xC0) == 0x80`
 //! - four-byte leaders: `byte >= 0xF0`
 
+#[cfg(any(
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
 /// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
 /// Stable replacement for the unstable `str::ceil_char_boundary`.
 #[inline(always)]

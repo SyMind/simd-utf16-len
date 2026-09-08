@@ -10,8 +10,11 @@ use std::arch::x86_64::*;
 #[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
     let len = s.len();
-    if len == 0 {
-        return 0;
+    if len < 16 {
+        // At most 15 bytes, so this accumulator cannot overflow.
+        return s.bytes().fold(0u8, |count, byte| {
+            count + u8::from((byte as i8) > -65) + u8::from(byte >= 0xF0)
+        }) as usize;
     }
 
     utf16_length_sse2(s)
@@ -55,11 +58,23 @@ fn utf16_length_sse2(s: &str) -> usize {
         }
     }
 
-    // Tail: find the next char boundary and use encode_utf16().count().
-    // Bytes between i and the char boundary are all continuation bytes,
-    // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(s, i);
-    count + s[tail_start..].encode_utf16().count()
+    if i < len {
+        // SAFETY: the caller requires len >= 16. Reload the last full vector,
+        // then discard mask bits for the bytes already counted by the loop.
+        unsafe {
+            let chunk = _mm_loadu_si128(bytes.as_ptr().add(len - 16) as *const __m128i);
+            let leaders = _mm_movemask_epi8(_mm_cmpgt_epi8(chunk, _mm_set1_epi8(-65))) as u32;
+            let four_mask = _mm_set1_epi8(0xF0_u8 as i8);
+            let fours =
+                _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask))
+                    as u32;
+            let skip = 16 - (len - i);
+            // Keep the two masks in separate halves so a four-byte leader
+            // contributes twice, without requiring the POPCNT CPU feature.
+            count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
+        }
+    }
+    count
 }
 
 /// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
