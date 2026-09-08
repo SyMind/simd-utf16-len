@@ -7,63 +7,67 @@ use std::arch::x86_64::*;
 /// Compute the number of UTF-16 code units for UTF-8 string.
 #[allow(unsafe_code)]
 pub fn utf16_len(s: &str) -> usize {
-    if s.is_ascii() {
+    // Reject early non-ASCII bytes before starting the full ASCII scan.
+    let prefix_is_ascii = s.as_bytes().get(..8).is_none_or(|prefix| prefix.is_ascii());
+    if prefix_is_ascii && s.is_ascii() {
         return s.len();
     }
     if s.len() < 16 {
         return crate::scalar::utf16_len(s);
     }
 
-    // SAFETY: SSE2 is always available on x86_64.
-    unsafe { utf16_length_sse2(s) }
+    utf16_length_sse2(s)
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
 #[inline]
-unsafe fn utf16_length_sse2(s: &str) -> usize {
+fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
     let mut i: usize = 0;
 
-    let cont_mask = _mm_set1_epi8(0xC0_u8 as i8);
-    let cont_val = _mm_set1_epi8(0x80_u8 as i8);
-    let four_threshold = _mm_set1_epi8(0xEF_u8 as i8);
-    let ones = _mm_set1_epi8(1);
-    let zero = _mm_setzero_si128();
+    // SAFETY: SSE2 is always available on x86_64, and each load is in bounds.
+    unsafe {
+        let cont_mask = _mm_set1_epi8(0xC0_u8 as i8);
+        let cont_val = _mm_set1_epi8(0x80_u8 as i8);
+        let four_threshold = _mm_set1_epi8(0xEF_u8 as i8);
+        let ones = _mm_set1_epi8(1);
+        let zero = _mm_setzero_si128();
 
-    // Process 16 bytes at a time, in batches of up to 255 iterations
-    // to avoid u8 overflow in the per-lane accumulators.
-    while i + 16 <= len {
-        let batch = ((len - i) / 16).min(255);
-        let mut cont_acc = zero;
-        let mut four_acc = zero;
+        // Process 16 bytes at a time, in batches of up to 255 iterations
+        // to avoid u8 overflow in the per-lane accumulators.
+        while i + 16 <= len {
+            let batch = ((len - i) / 16).min(255);
+            let mut cont_acc = zero;
+            let mut four_acc = zero;
 
-        for _ in 0..batch {
-            let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
+            for _ in 0..batch {
+                let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
 
-            let masked = _mm_and_si128(chunk, cont_mask);
-            let is_cont = _mm_cmpeq_epi8(masked, cont_val);
-            cont_acc = _mm_sub_epi8(cont_acc, is_cont);
+                let masked = _mm_and_si128(chunk, cont_mask);
+                let is_cont = _mm_cmpeq_epi8(masked, cont_val);
+                cont_acc = _mm_sub_epi8(cont_acc, is_cont);
 
-            let sub = _mm_subs_epu8(chunk, four_threshold);
-            let is_four = _mm_min_epu8(sub, ones);
-            four_acc = _mm_add_epi8(four_acc, is_four);
+                let sub = _mm_subs_epu8(chunk, four_threshold);
+                let is_four = _mm_min_epu8(sub, ones);
+                four_acc = _mm_add_epi8(four_acc, is_four);
 
-            i += 16;
+                i += 16;
+            }
+
+            // Horizontal sum via SAD (Sum of Absolute Differences) against zero.
+            let cont_sad = _mm_sad_epu8(cont_acc, zero);
+            let high = _mm_srli_si128::<8>(cont_sad);
+            let sum = _mm_add_epi64(cont_sad, high);
+            continuation_count += _mm_cvtsi128_si64(sum) as usize;
+
+            let four_sad = _mm_sad_epu8(four_acc, zero);
+            let high = _mm_srli_si128::<8>(four_sad);
+            let sum = _mm_add_epi64(four_sad, high);
+            four_byte_count += _mm_cvtsi128_si64(sum) as usize;
         }
-
-        // Horizontal sum via SAD (Sum of Absolute Differences) against zero.
-        let cont_sad = _mm_sad_epu8(cont_acc, zero);
-        let high = _mm_srli_si128::<8>(cont_sad);
-        let sum = _mm_add_epi64(cont_sad, high);
-        continuation_count += _mm_cvtsi128_si64(sum) as usize;
-
-        let four_sad = _mm_sad_epu8(four_acc, zero);
-        let high = _mm_srli_si128::<8>(four_sad);
-        let sum = _mm_add_epi64(four_sad, high);
-        four_byte_count += _mm_cvtsi128_si64(sum) as usize;
     }
 
     // Tail: find the next char boundary and use encode_utf16().count().
