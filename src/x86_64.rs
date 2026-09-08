@@ -6,18 +6,13 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 #[allow(unsafe_code)]
-// Keep the SIMD loops shared across call sites, including with LTO.
-#[inline(never)]
 pub fn utf16_len(s: &str) -> usize {
     let len = s.len();
     if len < 16 {
         if s.is_ascii() {
             return len;
         }
-        // At most 15 bytes, so this accumulator cannot overflow.
-        return s.bytes().fold(0u8, |count, byte| {
-            count + u8::from((byte as i8) > -65) + u8::from(byte >= 0xF0)
-        }) as usize;
+        return crate::scalar::utf16_len(s);
     }
 
     utf16_length_sse2(s)
@@ -49,7 +44,8 @@ fn utf16_length_sse2(s: &str) -> usize {
             let batch = ((len - i) / 16).min(255);
             let mut leader_acc = zero;
             let mut four_acc = zero;
-            for _ in 0..batch {
+            let end = i + batch * 16;
+            while i < end {
                 let chunk = _mm_loadu_si128(bytes.as_ptr().add(i) as *const __m128i);
                 let is_leader = _mm_cmpgt_epi8(chunk, cont_max);
                 let is_four = _mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask);
@@ -66,7 +62,9 @@ fn utf16_length_sse2(s: &str) -> usize {
     if len - i < 4 {
         // A complete four-byte character cannot start in the final three
         // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
-        count += bytes[i..]
+        // SAFETY: i starts within the slice and only advances across full
+        // in-bounds vectors, so the remaining slice is valid.
+        count += unsafe { bytes.get_unchecked(i..) }
             .iter()
             .filter(|&&byte| (byte as i8) > -65)
             .count();
@@ -131,5 +129,11 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
         i += 16;
     }
 
-    if bytes[i..].is_ascii() { len } else { i }
+    // SAFETY: the initial probe requires len >= 16, and every increment
+    // follows a successful in-bounds block check, so i <= len.
+    if unsafe { bytes.get_unchecked(i..) }.is_ascii() {
+        len
+    } else {
+        i
+    }
 }

@@ -20,12 +20,16 @@ fn ascii_guard_len(s: &str) -> usize {
 
 fn bench_inputs(c: &mut Criterion) {
     let ascii_long = ASCII.repeat(64);
+    let cjk_long = CJK.repeat(64);
+    let emoji_long = EMOJI.repeat(64);
     let inputs: &[(&str, &str)] = &[
         ("ascii", ASCII),
         ("ascii_long", ascii_long.as_str()),
         ("cjk", CJK),
         ("emoji", EMOJI),
         ("mixed", MIXED),
+        ("cjk_long", cjk_long.as_str()),
+        ("emoji_long", emoji_long.as_str()),
     ];
 
     let mut group = c.benchmark_group("utf16_len");
