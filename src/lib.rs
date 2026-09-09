@@ -14,14 +14,14 @@
 mod ascii;
 
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
-/// Find the smallest index `>= i` that is a valid UTF-8 char boundary.
+/// Find the smallest index `>= i` that is a char boundary in valid UTF-8 bytes.
 /// Stable replacement for the unstable `str::ceil_char_boundary`.
 #[inline(always)]
-fn ceil_char_boundary(s: &str, i: usize) -> usize {
-    let bytes = s.as_bytes();
+fn ceil_char_boundary(bytes: &[u8], i: usize) -> usize {
     let len = bytes.len();
     if i >= len {
         return len;
@@ -45,6 +45,7 @@ mod aarch64;
 mod wasm32;
 
 #[cfg(not(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 )))]

@@ -6,24 +6,23 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 pub fn utf16_len(s: &str) -> usize {
-    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
-    if start == s.len() {
+    let bytes = s.as_bytes();
+    let start = crate::ascii::ascii_prefix_len(bytes);
+    if start == bytes.len() {
         start
     } else {
-        utf16_length_sse2(s)
+        // SAFETY: bytes comes from a valid str, and start is a verified ASCII prefix.
+        unsafe { utf16_length_sse2(bytes, start) }
     }
 }
 
-/// SSE2 implementation: processes 16 bytes per iteration.
+/// Count UTF-8 bytes after a verified ASCII prefix, including short inputs.
+///
+/// # Safety
+/// `bytes` must be valid UTF-8, with `i <= bytes.len()` and an ASCII prefix `bytes[..i]`.
 #[inline(always)]
-fn utf16_length_sse2(s: &str) -> usize {
-    let bytes = s.as_bytes();
+unsafe fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
     let len = bytes.len();
-    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
-    if i == len {
-        return len;
-    }
-
     let mut count = i;
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by
@@ -54,17 +53,13 @@ fn utf16_length_sse2(s: &str) -> usize {
         }
     }
 
-    if len - i < 4 {
-        // A complete four-byte character cannot start in the final three
-        // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
-        // SAFETY: i starts within the slice and only advances across full
-        // in-bounds vectors, so the remaining slice is valid.
-        count += unsafe { bytes.get_unchecked(i..) }
-            .iter()
-            .filter(|&&byte| (byte as i8) > -65)
-            .count();
-    } else {
-        // SAFETY: the caller requires len >= 16. Reload the last full vector,
+    let remaining = len - i;
+    if remaining == 0 {
+        return count;
+    }
+
+    if len >= 16 {
+        // SAFETY: len >= 16 was checked above. Reload the last full vector,
         // then discard mask bits for the bytes already counted by the loop.
         unsafe {
             let chunk = _mm_loadu_si128(bytes.as_ptr().add(len - 16) as *const __m128i);
@@ -73,11 +68,18 @@ fn utf16_length_sse2(s: &str) -> usize {
             let fours =
                 _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask))
                     as u32;
-            let skip = 16 - (len - i);
+            let skip = 16 - remaining;
             // Keep the two masks in separate halves so a four-byte leader
             // contributes twice, without requiring the POPCNT CPU feature.
             count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
         }
+    } else {
+        // Tail: skip continuation bytes to reach the next character boundary.
+        // Their leader already contributed its UTF-16 units to count.
+        let tail_start = crate::ceil_char_boundary(bytes, i);
+        // SAFETY: bytes is valid UTF-8 and tail_start is a character boundary.
+        let tail = unsafe { std::str::from_utf8_unchecked(&bytes[tail_start..]) };
+        count += tail.encode_utf16().count();
     }
     count
 }
