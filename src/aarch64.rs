@@ -64,6 +64,8 @@ fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
         // Bytes between i and the char boundary are all continuation bytes,
         // contributing 0 to UTF-16 length, so we can skip them.
         let tail_start = crate::ceil_char_boundary(s, i);
-        i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+        // SAFETY: ceil_char_boundary returns an in-bounds character boundary.
+        let tail = s.get_unchecked(tail_start..);
+        i - continuation_count + four_byte_count + tail.encode_utf16().count()
     }
 }
