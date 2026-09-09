@@ -14,6 +14,17 @@ on:
           - simulation
           - walltime
         default: simulation
+      lto:
+        description: Use Rspack release LTO settings
+        type: boolean
+        default: false
+      runner:
+        description: Benchmark runner
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -22,7 +33,10 @@ permissions:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    env:
+      CARGO_PROFILE_BENCH_LTO: ${{ inputs.lto && 'fat' || 'off' }}
+      CARGO_PROFILE_BENCH_CODEGEN_UNITS: ${{ inputs.lto && '1' || '16' }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup rust toolchain, cache and cargo-codspeed binary
