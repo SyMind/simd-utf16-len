@@ -49,15 +49,13 @@ fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
         }
     }
 
-    if len - i < 4 {
+    // SAFETY: i starts at the verified prefix and only advances across full
+    // in-bounds vectors, so the remaining slice is valid.
+    let tail = unsafe { bytes.get_unchecked(i..) };
+    if tail.len() < 4 {
         // A complete four-byte character cannot start in the final three
         // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
-        // SAFETY: i starts within the slice and only advances across full
-        // in-bounds vectors, so the remaining slice is valid.
-        count += unsafe { bytes.get_unchecked(i..) }
-            .iter()
-            .filter(|&&byte| (byte as i8) > -65)
-            .count();
+        count += tail.iter().filter(|&&byte| (byte as i8) > -65).count();
     } else if len >= 16 {
         // SAFETY: len >= 16 was checked above. Reload the last full vector,
         // then discard mask bits for the bytes already counted by the loop.
@@ -68,7 +66,7 @@ fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
             let fours =
                 _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask))
                     as u32;
-            let skip = 16 - (len - i);
+            let skip = 16 - tail.len();
             // Keep the two masks in separate halves so a four-byte leader
             // contributes twice, without requiring the POPCNT CPU feature.
             count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
@@ -76,7 +74,7 @@ fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
     } else {
         // The input is too short for a full vector load. Apply the same
         // leader + four-byte-leader formula directly to the remaining bytes.
-        count = bytes[i..].iter().fold(count, |count, &byte| {
+        count = tail.iter().fold(count, |count, &byte| {
             count + usize::from((byte as i8) > -65) + usize::from(byte >= 0xF0)
         });
     }
