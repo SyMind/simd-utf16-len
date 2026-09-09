@@ -4,9 +4,11 @@ use std::arch::aarch64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 pub fn utf16_len(s: &str) -> usize {
-    match crate::ascii::ascii_prefix_len(s.as_bytes()) {
-        None => s.len(),
-        Some(start) => utf16_len_non_ascii(s, start),
+    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
+    if start == s.len() {
+        start
+    } else {
+        utf16_len_non_ascii(s, start)
     }
 }
 

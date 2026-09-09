@@ -14,18 +14,26 @@ pub fn utf16_len(s: &str) -> usize {
         return crate::scalar::utf16_len(s);
     }
 
-    utf16_length_sse2(s)
+    // A non-ASCII first word is already enough to select UTF-16 counting.
+    // Avoid scanning a full 64-byte ASCII block only to load it again below.
+    // SAFETY: len >= 16, so the first word is entirely within the string.
+    let first = unsafe { s.as_ptr().cast::<u64>().read_unaligned() };
+    if first & 0x8080_8080_8080_8080 != 0 {
+        return utf16_length_sse2(s, 0);
+    }
+    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
+    if start == len {
+        len
+    } else {
+        utf16_length_sse2(s, start)
+    }
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
 #[inline(always)]
-fn utf16_length_sse2(s: &str) -> usize {
+fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
-    let Some(mut i) = crate::ascii::ascii_prefix_len(bytes) else {
-        return len;
-    };
-
     let mut count = i;
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by
