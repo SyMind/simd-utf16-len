@@ -9,7 +9,7 @@
 
 /// Return the length for ASCII, or a prefix known to contain only ASCII bytes.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-#[inline]
+#[inline(always)]
 pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
     const USIZE_SIZE: usize = size_of::<usize>();
     const NONASCII_MASK: usize = usize::MAX / 255 * 0x80;
@@ -42,7 +42,7 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline]
+#[inline(always)]
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     use std::arch::x86_64::{__m128i, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128};
 
@@ -64,7 +64,7 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
         }
     }
 
-    if rest.iter().all(|b| b.is_ascii()) {
+    if rest.is_ascii() {
         bytes.len()
     } else {
         bytes.len() - rest.len()
@@ -72,7 +72,7 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
 }
 
 #[cfg(target_arch = "aarch64")]
-#[inline]
+#[inline(always)]
 fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
     use std::arch::aarch64::{vld1q_u8, vmaxvq_u8, vorrq_u8};
 
@@ -107,7 +107,7 @@ fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
         }
     }
 
-    if rest.iter().all(|b| b.is_ascii()) {
+    if rest.is_ascii() {
         bytes.len()
     } else {
         bytes.len() - rest.len()
@@ -116,7 +116,7 @@ fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
 
 /// Match the standard library's word-at-a-time path on wasm32.
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-#[inline]
+#[inline(always)]
 pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
     const USIZE_SIZE: usize = size_of::<usize>();
 

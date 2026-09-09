@@ -6,15 +6,12 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 pub fn utf16_len(s: &str) -> usize {
-    let len = s.len();
-    if len < 16 {
-        if s.is_ascii() {
-            return len;
-        }
-        return crate::scalar::utf16_len(s);
+    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
+    if start == s.len() {
+        start
+    } else {
+        utf16_length_sse2(s)
     }
-
-    utf16_length_sse2(s)
 }
 
 /// SSE2 implementation: processes 16 bytes per iteration.
