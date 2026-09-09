@@ -6,27 +6,21 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 pub fn utf16_len(s: &str) -> usize {
-    let len = s.len();
-    if len < 16 {
-        if s.is_ascii() {
-            return len;
-        }
-        return crate::scalar::utf16_len(s);
+    let bytes = s.as_bytes();
+    let start = crate::ascii::ascii_prefix_len(bytes);
+    if start == bytes.len() {
+        start
+    } else if bytes.len() < 16 {
+        crate::scalar::utf16_len(s)
+    } else {
+        utf16_length_sse2(bytes, start)
     }
-
-    utf16_length_sse2(s)
 }
 
-/// SSE2 implementation: processes 16 bytes per iteration.
+/// Count after a verified ASCII prefix. Requires at least 16 bytes.
 #[inline(always)]
-fn utf16_length_sse2(s: &str) -> usize {
-    let bytes = s.as_bytes();
+fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
     let len = bytes.len();
-    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
-    if i == len {
-        return len;
-    }
-
     let mut count = i;
 
     // SAFETY: SSE2 is always available on x86_64, and every load is guarded by

@@ -6,19 +6,18 @@ use std::arch::x86_64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string.
 pub fn utf16_len(s: &str) -> usize {
-    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
-    if start == s.len() {
+    let bytes = s.as_bytes();
+    let start = crate::ascii::ascii_prefix_len(bytes);
+    if start == bytes.len() {
         start
-    } else if s.len() < 16 {
-        crate::scalar::utf16_len(s)
     } else {
-        utf16_length_sse2(s, start)
+        utf16_length_sse2(bytes, start)
     }
 }
 
-/// SSE2 implementation: processes 16 bytes per iteration.
-fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
-    let bytes = s.as_bytes();
+/// Count UTF-8 bytes after a verified ASCII prefix, including short inputs.
+#[inline(always)]
+fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
     let len = bytes.len();
     let mut count = i;
 
@@ -59,8 +58,8 @@ fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
             .iter()
             .filter(|&&byte| (byte as i8) > -65)
             .count();
-    } else {
-        // SAFETY: the caller requires len >= 16. Reload the last full vector,
+    } else if len >= 16 {
+        // SAFETY: len >= 16 was checked above. Reload the last full vector,
         // then discard mask bits for the bytes already counted by the loop.
         unsafe {
             let chunk = _mm_loadu_si128(bytes.as_ptr().add(len - 16) as *const __m128i);
@@ -74,6 +73,12 @@ fn utf16_length_sse2(s: &str, mut i: usize) -> usize {
             // contributes twice, without requiring the POPCNT CPU feature.
             count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
         }
+    } else {
+        // The input is too short for a full vector load. Apply the same
+        // leader + four-byte-leader formula directly to the remaining bytes.
+        count = bytes[i..].iter().fold(count, |count, &byte| {
+            count + usize::from((byte as i8) > -65) + usize::from(byte >= 0xF0)
+        });
     }
     count
 }

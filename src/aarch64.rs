@@ -4,18 +4,22 @@ use std::arch::aarch64::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 pub fn utf16_len(s: &str) -> usize {
-    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
-    if start == s.len() {
+    let bytes = s.as_bytes();
+    let start = crate::ascii::ascii_prefix_len(bytes);
+    if start == bytes.len() {
         start
     } else {
-        utf16_len_non_ascii(s, start)
+        // SAFETY: bytes comes from a valid str, and start is a verified ASCII prefix.
+        unsafe { utf16_len_non_ascii(bytes, start) }
     }
 }
 
 /// Count the remaining bytes after an already checked ASCII prefix.
+///
+/// # Safety
+/// `bytes` must be valid UTF-8, with `i <= bytes.len()` and an ASCII prefix `bytes[..i]`.
 #[inline(always)]
-fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
-    let bytes = s.as_bytes();
+unsafe fn utf16_len_non_ascii(bytes: &[u8], mut i: usize) -> usize {
     let len = bytes.len();
 
     let mut continuation_count: usize = 0;
@@ -63,9 +67,9 @@ fn utf16_len_non_ascii(s: &str, mut i: usize) -> usize {
         // Tail: find the next char boundary and use encode_utf16().count().
         // Bytes between i and the char boundary are all continuation bytes,
         // contributing 0 to UTF-16 length, so we can skip them.
-        let tail_start = crate::ceil_char_boundary(s, i);
-        // SAFETY: ceil_char_boundary returns an in-bounds character boundary.
-        let tail = s.get_unchecked(tail_start..);
+        let tail_start = crate::ceil_char_boundary(bytes, i);
+        // SAFETY: bytes is valid UTF-8 and tail_start is a character boundary.
+        let tail = std::str::from_utf8_unchecked(&bytes[tail_start..]);
         i - continuation_count + four_byte_count + tail.encode_utf16().count()
     }
 }

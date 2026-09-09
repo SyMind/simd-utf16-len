@@ -58,7 +58,7 @@ pub fn utf16_len(s: &str) -> usize {
     // Tail: find the next char boundary and use encode_utf16().count().
     // Bytes between i and the char boundary are all continuation bytes,
     // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(s, i);
+    let tail_start = crate::ceil_char_boundary(bytes, i);
     i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
 }
 
