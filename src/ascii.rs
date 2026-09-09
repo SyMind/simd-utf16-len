@@ -46,13 +46,15 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
 fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
     use std::arch::x86_64::{__m128i, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128};
 
-    let (chunks, rest) = bytes.as_chunks::<64>();
-    let end = chunks.len() * 64;
+    // Use one offset for both loop control and the verified prefix. Tracking
+    // an iterator pointer separately adds address arithmetic to every block.
+    let end = bytes.len() / 64 * 64;
+    let rest = &bytes[end..];
     let mut offset = 0;
     while offset < end {
         // SAFETY: offset starts at zero and advances by one complete chunk.
         let ptr = unsafe { bytes.as_ptr().add(offset) };
-        // SAFETY: chunk is 64 bytes. SSE2 is baseline on x86_64.
+        // SAFETY: the whole 64-byte block is in bounds; SSE2 is baseline on x86_64.
         let mask = unsafe {
             let a1 = _mm_loadu_si128(ptr as *const __m128i);
             let a2 = _mm_loadu_si128(ptr.add(16) as *const __m128i);
@@ -79,10 +81,16 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
 fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
     use std::arch::aarch64::{vld1q_u8, vmaxvq_u8, vorrq_u8};
 
-    let (chunks, rest) = bytes.as_chunks::<64>();
-    for chunk in chunks {
-        let ptr = chunk.as_ptr();
-        // SAFETY: chunk is 64 bytes. NEON is baseline on aarch64, and these
+    // Use one offset for both loop control and the verified prefix. Tracking
+    // an iterator pointer separately adds address arithmetic to every block.
+    let end = bytes.len() / 64 * 64;
+    let rest = &bytes[end..];
+    let mut offset = 0;
+    while offset < end {
+        // SAFETY: offset starts at zero and advances by one complete chunk.
+        let ptr = unsafe { bytes.as_ptr().add(offset) };
+        // SAFETY: the whole 64-byte block is in bounds. NEON is baseline on
+        // aarch64, and these
         // vector loads do not require alignment.
         let max = unsafe {
             let a1 = vld1q_u8(ptr);
@@ -94,9 +102,9 @@ fn ascii_prefix_len_neon(bytes: &[u8]) -> usize {
             vmaxvq_u8(combined)
         };
         if max >= 128 {
-            // SAFETY: chunk starts within the same allocation as bytes.
-            return unsafe { ptr.offset_from_unsigned(bytes.as_ptr()) };
+            return offset;
         }
+        offset += 64;
     }
 
     // Match std's NEON tail: full vectors, then fewer than 16 scalar bytes.
