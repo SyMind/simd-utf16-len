@@ -26,7 +26,7 @@ Where:
 - **Continuation bytes** (`(byte & 0xC0) == 0x80`) don't produce UTF-16 code units
 - **Four-byte leaders** (`byte >= 0xF0`) produce surrogate pairs (2 UTF-16 code units instead of 1)
 
-The SIMD implementations first scan for an ASCII prefix. Entirely ASCII strings return their byte length; otherwise, the verified prefix contributes its byte length and the remaining bytes are counted using 16-byte SIMD vectors. The x86_64 and aarch64 ASCII scans process 64-byte blocks in their bulk loops.
+The SIMD implementations first scan for an ASCII prefix. Entirely ASCII strings return their byte length; otherwise, the verified prefix contributes its byte length and the remaining bytes are counted using 16-byte SIMD vectors. The ASCII scans follow Rust's standard-library strategy at commit [`4aa1fbc`](https://github.com/rust-lang/rust/blob/4aa1fbcf467cf38ce58abfa8eb9213a789c5381c/library/core/src/slice/ascii.rs): x86_64 uses 64-byte SSE2 blocks, and aarch64 uses 64-byte NEON blocks with a 16-byte vector tail. Both use word-sized checks below 64 bytes. wasm32 uses aligned `usize` loads between unaligned first and last words. The adaptation returns the verified prefix length instead of a boolean; it uses the same block sizes, loads, and tail checks.
 
 Call `utf16_len(s)` directly when the ASCII status is unknown. If the caller already guarantees or caches that a string is ASCII, `s.len()` remains an O(1) operation and avoids scanning altogether.
 
@@ -55,7 +55,7 @@ fn std_guard_len(s: &str) -> usize {
 
 Results below are from [run 34220758753](https://github.com/SyMind/simd-utf16-len/actions/runs/34220758753) on **2026-09-08**, at commit [`a241509`](https://github.com/SyMind/simd-utf16-len/commit/a2415096978d0d3923d16fdf0711963a079f7506), using Rust **1.98.1**. Each measurement uses 1,000 warmup iterations followed by 10 samples of 10,000 iterations; the example reports the middle sorted sample as nanoseconds per iteration. Speedup is the baseline time divided by the SIMD time, as reported by the example.
 
-For this run, the 169-byte ASCII input was **1.5–2.4x faster** than the ASCII guard, and the non-ASCII inputs were **8.8–13.1x faster** than the same baseline. Results depend on input length, character distribution, CPU, and compiler; these ratios do not establish a speedup for every string or platform.
+These historical results predate the standard-library-aligned ASCII scanner; they do not describe the current ASCII path. For this run, the 169-byte ASCII input was **1.5–2.4x faster** than the ASCII guard, and the non-ASCII inputs were **8.8–13.1x faster** than the same baseline. Results depend on input length, character distribution, CPU, and compiler; these ratios do not establish a speedup for every string or platform.
 
 ### Linux x86_64
 
@@ -100,9 +100,9 @@ Use `--release`: a plain `cargo run --example bench_compare` builds unoptimized 
 
 ### CodSpeed regression tracking
 
-The separate [CodSpeed workflow](.github/workflows/codspeed.yml) runs the [benchmark suite](benches/utf16_len.rs) in **Simulation** mode by default. Its 12 cases cover ASCII, long ASCII (10,816 bytes), CJK, emoji, and mixed text; they compare SIMD with `encode_utf16().count()` and include the ASCII guard for both ASCII inputs.
+The separate [CodSpeed workflow](.github/workflows/codspeed.yml) runs the [benchmark suite](benches/utf16_len.rs) in **Simulation** mode by default for pushes, pull requests, and manual runs. Its 9 cases cover long ASCII (10,816 bytes), CJK, emoji, and mixed text; they compare SIMD with `encode_utf16().count()` and include the ASCII guard for the ASCII input. The long ASCII fixture has a separate benchmark identity from the historical 169-byte fixture, so changing the input size is not reported as a code regression; Unicode benchmark identities remain unchanged.
 
-Use the [CodSpeed dashboard](https://app.codspeed.io/SyMind/simd-utf16-len) to track changes across commits. Simulation results are distinct from the native timings above. The workflow also supports **Walltime** mode through its manual `mode` input.
+Use the [CodSpeed dashboard](https://app.codspeed.io/SyMind/simd-utf16-len) to track changes across commits and inspect flamegraphs. Simulation results represent modeled execution costs and are distinct from the native timings above. The workflow also supports **Walltime** mode through its manual `mode` input to measure actual elapsed time.
 
 The [CI workflow](.github/workflows/ci.yml) runs `cargo test` on Linux, macOS, and Windows to check correctness.
 

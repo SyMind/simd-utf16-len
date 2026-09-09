@@ -3,7 +3,6 @@
 use std::arch::wasm32::*;
 
 /// Compute the number of UTF-16 code units for UTF-8 string using WASM SIMD128.
-#[allow(unsafe_code)]
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -13,7 +12,7 @@ pub fn utf16_len(s: &str) -> usize {
 
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
-    let mut i: usize = ascii_prefix_len_simd128(bytes);
+    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
     if i == len {
         return len;
     }
@@ -56,15 +55,12 @@ pub fn utf16_len(s: &str) -> usize {
         four_byte_count += horizontal_sum_u8(four_acc);
     }
 
-    // Tail: find the next char boundary and use encode_utf16().count().
-    // Bytes between i and the char boundary are all continuation bytes,
-    // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(s, i);
-    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    // SAFETY: bytes comes from a valid str, and the SIMD loop maintains i <= len.
+    i - continuation_count + four_byte_count + unsafe { crate::utf16_len_tail(bytes, i) }
 }
 
 /// Horizontal sum of all u8 lanes in a v128 register.
-#[inline]
+#[inline(always)]
 fn horizontal_sum_u8(v: v128) -> usize {
     // u8x16 -> i16x8 (pairwise add adjacent u8 lanes)
     let pairs = i16x8_extadd_pairwise_u8x16(v);
@@ -75,23 +71,4 @@ fn horizontal_sum_u8(v: v128) -> usize {
         + i32x4_extract_lane::<1>(quads)
         + i32x4_extract_lane::<2>(quads)
         + i32x4_extract_lane::<3>(quads)) as usize
-}
-
-/// Return `bytes.len()` when all bytes are ASCII, otherwise return the start of
-/// the first 16-byte block (or tail) that may contain a non-ASCII byte.
-#[inline]
-fn ascii_prefix_len_simd128(bytes: &[u8]) -> usize {
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i + 16 <= len {
-        // SAFETY: i + 16 <= len is guaranteed by the while condition.
-        let high_bits = unsafe { i8x16_bitmask(v128_load(bytes.as_ptr().add(i) as *const v128)) };
-        if high_bits != 0 {
-            return i;
-        }
-        i += 16;
-    }
-
-    if bytes[i..].is_ascii() { len } else { i }
 }

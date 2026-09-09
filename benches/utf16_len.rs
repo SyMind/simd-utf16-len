@@ -18,15 +18,26 @@ fn ascii_guard_len(s: &str) -> usize {
     }
 }
 
+// The long ASCII fixture has its own benchmark identity: the historical
+// bench_inputs::ascii used 169 bytes, while this fixture uses 10,816 bytes.
+fn bench_ascii(c: &mut Criterion) {
+    let ascii = ASCII.repeat(64);
+    let input = ascii.as_str();
+    let mut group = c.benchmark_group("utf16_len");
+    group.bench_function(BenchmarkId::new("ascii", "simd"), |b| {
+        b.iter(|| utf16_len(black_box(input)));
+    });
+    group.bench_function(BenchmarkId::new("ascii", "encode_utf16"), |b| {
+        b.iter(|| black_box(input).encode_utf16().count());
+    });
+    group.bench_function(BenchmarkId::new("ascii", "is_ascii"), |b| {
+        b.iter(|| ascii_guard_len(black_box(input)));
+    });
+    group.finish();
+}
+
 fn bench_inputs(c: &mut Criterion) {
-    let ascii_long = ASCII.repeat(64);
-    let inputs: &[(&str, &str)] = &[
-        ("ascii", ASCII),
-        ("ascii_long", ascii_long.as_str()),
-        ("cjk", CJK),
-        ("emoji", EMOJI),
-        ("mixed", MIXED),
-    ];
+    let inputs: &[(&str, &str)] = &[("cjk", CJK), ("emoji", EMOJI), ("mixed", MIXED)];
 
     let mut group = c.benchmark_group("utf16_len");
     for &(name, input) in inputs {
@@ -36,14 +47,9 @@ fn bench_inputs(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "encode_utf16"), |b| {
             b.iter(|| black_box(input).encode_utf16().count());
         });
-        if name.starts_with("ascii") {
-            group.bench_function(BenchmarkId::new(name, "is_ascii"), |b| {
-                b.iter(|| ascii_guard_len(black_box(input)));
-            });
-        }
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_inputs);
+criterion_group!(benches, bench_ascii, bench_inputs);
 criterion_main!(benches);
