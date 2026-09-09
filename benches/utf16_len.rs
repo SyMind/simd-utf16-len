@@ -1,5 +1,7 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use simd_utf16_len::utf16_len;
+#[path = "../comparison/std_current.rs"]
+mod std_current;
 
 const ASCII: &str = "The quick brown fox jumps over the lazy dog. This is a longer sentence to provide more data for benchmarking purposes, with various words and punctuation marks included.";
 
@@ -30,6 +32,7 @@ fn bench_inputs(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("utf16_len");
     for &(name, input) in inputs {
+        assert_eq!(std_current::is_ascii(input.as_bytes()), input.is_ascii());
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
             b.iter(|| utf16_len(black_box(input)));
         });
@@ -38,6 +41,16 @@ fn bench_inputs(c: &mut Criterion) {
         });
         group.bench_function(BenchmarkId::new(name, "std_guard"), |b| {
             b.iter(|| ascii_guard_len(black_box(input)));
+        });
+        group.bench_function(BenchmarkId::new(name, "std_current"), |b| {
+            b.iter(|| {
+                let input = black_box(input);
+                if std_current::is_ascii(input.as_bytes()) {
+                    input.len()
+                } else {
+                    input.encode_utf16().count()
+                }
+            });
         });
     }
     group.finish();
