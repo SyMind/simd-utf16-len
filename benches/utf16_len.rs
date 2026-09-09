@@ -36,7 +36,7 @@ fn bench_inputs(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
             b.iter(|| utf16_len(black_box(input)));
         });
-        group.bench_function(BenchmarkId::new(name, "baseline"), |b| {
+        group.bench_function(BenchmarkId::new(name, "std_aligned"), |b| {
             b.iter(|| simd_utf16_baseline::utf16_len(black_box(input)));
         });
         group.bench_function(BenchmarkId::new(name, "std_guard"), |b| {

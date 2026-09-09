@@ -64,6 +64,15 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
         }
     }
 
+    // Experimental SSE2 vector tail, analogous to std's NEON vector tail.
+    let (vectors, rest) = rest.as_chunks::<16>();
+    for vector in vectors {
+        // SAFETY: vector contains 16 bytes. SSE2 is baseline on x86_64.
+        if unsafe { _mm_movemask_epi8(_mm_loadu_si128(vector.as_ptr().cast())) } != 0 {
+            // SAFETY: vector is part of bytes.
+            return unsafe { vector.as_ptr().offset_from_unsigned(bytes.as_ptr()) };
+        }
+    }
     if rest.iter().all(|b| b.is_ascii()) {
         bytes.len()
     } else {
