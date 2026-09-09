@@ -1,16 +1,16 @@
 //! ASCII scanning adapted from Rust 1.98.0's `core::slice::ascii`:
 //! https://github.com/rust-lang/rust/blob/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/slice/ascii.rs
 //!
-//! Keep the standard library's runtime scanning strategy, returning the length
+//! Keep the standard library's runtime scanning strategy, returning `None`
 //! on success and the already verified prefix on failure. This lets UTF-16
 //! counting resume without scanning that prefix again.
 //!
 //! Copyright (c) The Rust Project Contributors. See LICENSE-MIT-RUST.
 
-/// Return the length for ASCII, or a prefix known to contain only ASCII bytes.
+/// Return `None` for ASCII, or `Some(prefix)` with an already verified prefix.
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
+pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> Option<usize> {
     const USIZE_SIZE: usize = size_of::<usize>();
     const NONASCII_MASK: usize = usize::MAX / 255 * 0x80;
 
@@ -22,13 +22,13 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
             let word = usize::from_ne_bytes(chunk.try_into().unwrap());
             if (word & NONASCII_MASK) != 0 {
                 // SAFETY: chunk starts within the same allocation as bytes.
-                return unsafe { chunk.as_ptr().offset_from_unsigned(bytes.as_ptr()) };
+                return Some(unsafe { chunk.as_ptr().offset_from_unsigned(bytes.as_ptr()) });
             }
         }
         return if remainder.iter().all(|b| b.is_ascii()) {
-            bytes.len()
+            None
         } else {
-            bytes.len() - remainder.len()
+            Some(bytes.len() - remainder.len())
         };
     }
 
@@ -37,7 +37,7 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
 
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
-fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
+fn ascii_prefix_len_sse2(bytes: &[u8]) -> Option<usize> {
     use std::arch::x86_64::{__m128i, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128};
 
     let (chunks, rest) = bytes.as_chunks::<64>();
@@ -54,21 +54,21 @@ fn ascii_prefix_len_sse2(bytes: &[u8]) -> usize {
         };
         if mask != 0 {
             // SAFETY: chunk starts within the same allocation as bytes.
-            return unsafe { ptr.offset_from_unsigned(bytes.as_ptr()) };
+            return Some(unsafe { ptr.offset_from_unsigned(bytes.as_ptr()) });
         }
     }
 
     if rest.iter().all(|b| b.is_ascii()) {
-        bytes.len()
+        None
     } else {
-        bytes.len() - rest.len()
+        Some(bytes.len() - rest.len())
     }
 }
 
 /// Match the standard library's word-at-a-time path on aarch64 and wasm32.
 #[cfg(not(target_arch = "x86_64"))]
 #[inline(always)]
-pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
+pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> Option<usize> {
     const USIZE_SIZE: usize = size_of::<usize>();
 
     const fn contains_nonascii(word: usize) -> bool {
@@ -84,11 +84,11 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
         let mut remaining = bytes;
         while let [rest @ .., last] = remaining {
             if !last.is_ascii() {
-                return 0;
+                return Some(0);
             }
             remaining = rest;
         }
-        return len;
+        return None;
     }
 
     let offset_to_aligned = if align_offset == 0 {
@@ -100,7 +100,7 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
     // SAFETY: len >= USIZE_SIZE was checked above.
     let first_word = unsafe { start.cast::<usize>().read_unaligned() };
     if contains_nonascii(first_word) {
-        return 0;
+        return Some(0);
     }
     debug_assert!(offset_to_aligned <= len);
 
@@ -116,7 +116,7 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
         // SAFETY: word_ptr is aligned and the full word lies within bytes.
         let word = unsafe { word_ptr.read() };
         if contains_nonascii(word) {
-            return byte_pos;
+            return Some(byte_pos);
         }
         byte_pos += USIZE_SIZE;
         // SAFETY: byte_pos remains within the slice after this increment.
@@ -127,8 +127,8 @@ pub(crate) fn ascii_prefix_len(bytes: &[u8]) -> usize {
     // SAFETY: len >= USIZE_SIZE, so the last word is entirely within bytes.
     let last_word = unsafe { start.add(len - USIZE_SIZE).cast::<usize>().read_unaligned() };
     if contains_nonascii(last_word) {
-        byte_pos
+        Some(byte_pos)
     } else {
-        len
+        None
     }
 }

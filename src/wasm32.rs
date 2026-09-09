@@ -12,10 +12,9 @@ pub fn utf16_len(s: &str) -> usize {
 
     let mut continuation_count: usize = 0;
     let mut four_byte_count: usize = 0;
-    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
-    if i == len {
+    let Some(mut i) = crate::ascii::ascii_prefix_len(bytes) else {
         return len;
-    }
+    };
 
     let cont_mask = u8x16_splat(0xC0);
     let cont_val = u8x16_splat(0x80);

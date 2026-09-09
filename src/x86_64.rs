@@ -22,10 +22,9 @@ pub fn utf16_len(s: &str) -> usize {
 fn utf16_length_sse2(s: &str) -> usize {
     let bytes = s.as_bytes();
     let len = bytes.len();
-    let mut i: usize = crate::ascii::ascii_prefix_len(bytes);
-    if i == len {
+    let Some(mut i) = crate::ascii::ascii_prefix_len(bytes) else {
         return len;
-    }
+    };
 
     let mut count = i;
 
