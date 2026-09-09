@@ -11,13 +11,17 @@ pub fn utf16_len(s: &str) -> usize {
     if start == bytes.len() {
         start
     } else {
-        utf16_length_sse2(bytes, start)
+        // SAFETY: bytes comes from a valid str, and start is a verified ASCII prefix.
+        unsafe { utf16_length_sse2(bytes, start) }
     }
 }
 
 /// Count UTF-8 bytes after a verified ASCII prefix, including short inputs.
+///
+/// # Safety
+/// `bytes` must be valid UTF-8, with `i <= bytes.len()` and an ASCII prefix `bytes[..i]`.
 #[inline(always)]
-fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
+unsafe fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
     let len = bytes.len();
     let mut count = i;
 
@@ -49,14 +53,12 @@ fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
         }
     }
 
-    // SAFETY: i starts at the verified prefix and only advances across full
-    // in-bounds vectors, so the remaining slice is valid.
-    let tail = unsafe { bytes.get_unchecked(i..) };
-    if tail.len() < 4 {
-        // A complete four-byte character cannot start in the final three
-        // bytes of valid UTF-8. Count only ASCII bytes and shorter leaders.
-        count += tail.iter().filter(|&&byte| (byte as i8) > -65).count();
-    } else if len >= 16 {
+    let remaining = len - i;
+    if remaining == 0 {
+        return count;
+    }
+
+    if len >= 16 {
         // SAFETY: len >= 16 was checked above. Reload the last full vector,
         // then discard mask bits for the bytes already counted by the loop.
         unsafe {
@@ -66,17 +68,18 @@ fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
             let fours =
                 _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask))
                     as u32;
-            let skip = 16 - tail.len();
+            let skip = 16 - remaining;
             // Keep the two masks in separate halves so a four-byte leader
             // contributes twice, without requiring the POPCNT CPU feature.
             count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
         }
     } else {
-        // The input is too short for a full vector load. Apply the same
-        // leader + four-byte-leader formula directly to the remaining bytes.
-        count = tail.iter().fold(count, |count, &byte| {
-            count + usize::from((byte as i8) > -65) + usize::from(byte >= 0xF0)
-        });
+        // Tail: skip continuation bytes to reach the next character boundary.
+        // Their leader already contributed its UTF-16 units to count.
+        let tail_start = crate::ceil_char_boundary(bytes, i);
+        // SAFETY: bytes is valid UTF-8 and tail_start is a character boundary.
+        let tail = unsafe { std::str::from_utf8_unchecked(&bytes[tail_start..]) };
+        count += tail.encode_utf16().count();
     }
     count
 }
