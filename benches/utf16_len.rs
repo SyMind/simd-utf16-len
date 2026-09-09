@@ -22,6 +22,7 @@ fn bench_inputs(c: &mut Criterion) {
     let ascii = ASCII.repeat(64);
     let inputs: &[(&str, &str)] = &[
         ("ascii", ascii.as_str()),
+        ("ascii_short", ASCII),
         ("cjk", CJK),
         ("emoji", EMOJI),
         ("mixed", MIXED),
@@ -32,14 +33,12 @@ fn bench_inputs(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "simd"), |b| {
             b.iter(|| utf16_len(black_box(input)));
         });
-        group.bench_function(BenchmarkId::new(name, "encode_utf16"), |b| {
-            b.iter(|| black_box(input).encode_utf16().count());
+        group.bench_function(BenchmarkId::new(name, "baseline"), |b| {
+            b.iter(|| simd_utf16_baseline::utf16_len(black_box(input)));
         });
-        if name == "ascii" {
-            group.bench_function(BenchmarkId::new(name, "is_ascii"), |b| {
-                b.iter(|| ascii_guard_len(black_box(input)));
-            });
-        }
+        group.bench_function(BenchmarkId::new(name, "std_guard"), |b| {
+            b.iter(|| ascii_guard_len(black_box(input)));
+        });
     }
     group.finish();
 }
