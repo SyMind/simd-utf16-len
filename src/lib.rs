@@ -18,21 +18,21 @@ mod ascii;
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
-/// Find the smallest index `>= i` that is a char boundary in valid UTF-8 bytes.
-/// Stable replacement for the unstable `str::ceil_char_boundary`.
+/// Count the tail after skipping continuation bytes at `i`.
+/// The caller has already counted each preceding leader's full UTF-16 contribution.
+///
+/// # Safety
+/// `bytes` must be valid UTF-8, and `i <= bytes.len()`.
 #[inline(always)]
-fn ceil_char_boundary(bytes: &[u8], i: usize) -> usize {
-    let len = bytes.len();
-    if i >= len {
-        return len;
+unsafe fn utf16_len_tail(bytes: &[u8], i: usize) -> usize {
+    let mut tail_start = i;
+    // SAFETY: the length check guards each byte access.
+    while tail_start < bytes.len() && (unsafe { *bytes.get_unchecked(tail_start) } & 0xC0) == 0x80 {
+        tail_start += 1;
     }
-    // Skip continuation bytes (0b10xx_xxxx) directly on the byte slice,
-    // avoiding repeated bounds checks and method-call overhead.
-    let mut pos = i;
-    while pos < len && (unsafe { *bytes.get_unchecked(pos) } & 0xC0) == 0x80 {
-        pos += 1;
-    }
-    pos
+    // SAFETY: bytes is valid UTF-8, and tail_start <= bytes.len() is a char boundary.
+    let tail = unsafe { std::str::from_utf8_unchecked(bytes.get_unchecked(tail_start..)) };
+    tail.encode_utf16().count()
 }
 
 #[cfg(target_arch = "x86_64")]

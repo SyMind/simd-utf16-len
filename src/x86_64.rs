@@ -53,33 +53,10 @@ unsafe fn utf16_length_sse2(bytes: &[u8], mut i: usize) -> usize {
         }
     }
 
-    let remaining = len - i;
-    if remaining == 0 {
+    if i == len {
         return count;
     }
 
-    if len >= 16 {
-        // SAFETY: len >= 16 was checked above. Reload the last full vector,
-        // then discard mask bits for the bytes already counted by the loop.
-        unsafe {
-            let chunk = _mm_loadu_si128(bytes.as_ptr().add(len - 16) as *const __m128i);
-            let leaders = _mm_movemask_epi8(_mm_cmpgt_epi8(chunk, _mm_set1_epi8(-65))) as u32;
-            let four_mask = _mm_set1_epi8(0xF0_u8 as i8);
-            let fours =
-                _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(chunk, four_mask), four_mask))
-                    as u32;
-            let skip = 16 - remaining;
-            // Keep the two masks in separate halves so a four-byte leader
-            // contributes twice, without requiring the POPCNT CPU feature.
-            count += ((leaders >> skip) | ((fours >> skip) << 16)).count_ones() as usize;
-        }
-    } else {
-        // Tail: skip continuation bytes to reach the next character boundary.
-        // Their leader already contributed its UTF-16 units to count.
-        let tail_start = crate::ceil_char_boundary(bytes, i);
-        // SAFETY: bytes is valid UTF-8 and tail_start is a character boundary.
-        let tail = unsafe { std::str::from_utf8_unchecked(&bytes[tail_start..]) };
-        count += tail.encode_utf16().count();
-    }
-    count
+    // SAFETY: bytes is valid UTF-8, and the SIMD loop maintains i <= len.
+    count + unsafe { crate::utf16_len_tail(bytes, i) }
 }

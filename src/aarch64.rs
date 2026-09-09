@@ -64,12 +64,7 @@ unsafe fn utf16_len_non_ascii(bytes: &[u8], mut i: usize) -> usize {
             four_byte_count += vaddlvq_u8(four_acc) as usize;
         }
 
-        // Tail: find the next char boundary and use encode_utf16().count().
-        // Bytes between i and the char boundary are all continuation bytes,
-        // contributing 0 to UTF-16 length, so we can skip them.
-        let tail_start = crate::ceil_char_boundary(bytes, i);
-        // SAFETY: bytes is valid UTF-8 and tail_start is a character boundary.
-        let tail = std::str::from_utf8_unchecked(&bytes[tail_start..]);
-        i - continuation_count + four_byte_count + tail.encode_utf16().count()
+        // SAFETY: bytes is valid UTF-8, and the SIMD loop maintains i <= len.
+        i - continuation_count + four_byte_count + crate::utf16_len_tail(bytes, i)
     }
 }

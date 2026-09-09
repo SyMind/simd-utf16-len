@@ -55,11 +55,8 @@ pub fn utf16_len(s: &str) -> usize {
         four_byte_count += horizontal_sum_u8(four_acc);
     }
 
-    // Tail: find the next char boundary and use encode_utf16().count().
-    // Bytes between i and the char boundary are all continuation bytes,
-    // contributing 0 to UTF-16 length, so we can skip them.
-    let tail_start = crate::ceil_char_boundary(bytes, i);
-    i - continuation_count + four_byte_count + s[tail_start..].encode_utf16().count()
+    // SAFETY: bytes comes from a valid str, and the SIMD loop maintains i <= len.
+    i - continuation_count + four_byte_count + unsafe { crate::utf16_len_tail(bytes, i) }
 }
 
 /// Horizontal sum of all u8 lanes in a v128 register.
