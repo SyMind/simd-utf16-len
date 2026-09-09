@@ -18,10 +18,11 @@ pub fn utf16_len(s: &str) -> usize {
     // Avoid scanning a full 64-byte ASCII block only to load it again below.
     // SAFETY: len >= 16, so the first word is entirely within the string.
     let first = unsafe { s.as_ptr().cast::<u64>().read_unaligned() };
-    if first & 0x8080_8080_8080_8080 != 0 {
-        return utf16_length_sse2(s, 0);
-    }
-    let start = crate::ascii::ascii_prefix_len(s.as_bytes());
+    let start = if first & 0x8080_8080_8080_8080 != 0 {
+        0
+    } else {
+        crate::ascii::ascii_prefix_len(s.as_bytes())
+    };
     if start == len {
         len
     } else {
