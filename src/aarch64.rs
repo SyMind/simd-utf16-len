@@ -44,8 +44,7 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
     const CHUNK: usize = LANES * 4;
 
     // SAFETY: NEON is baseline on aarch64. Each full-vector load stays within
-    // the input, the mask table, or the placeholder, except the short-input
-    // load, which stays within the input's page.
+    // the input, the mask table, or the short input's halves.
     unsafe {
         let len = bytes.len();
         let mut sptr = bytes.as_ptr().add(start);
@@ -71,7 +70,7 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
 
         if len < LANES {
             // The whole input is shorter than a vector.
-            let (v, keep) = short_vector!(sptr, nb, LANES, vld1q_u8);
+            let (v, keep) = short_vector!(sptr, nb, vld1q_u8);
             return start + vaddlvq_u8(vandq_u8(units!(v), keep)) as usize;
         }
 

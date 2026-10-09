@@ -7,8 +7,7 @@
 //! fewer than four vectors skip the accumulators and count into one. Each
 //! byte's units come from an `i8x16.swizzle` lookup of its high nibble, as
 //! in json-escape-simd's nibble-table classifier. Inputs shorter than a
-//! vector are copied into a zeroed placeholder, as json-escape-simd does
-//! outside Linux and macOS.
+//! vector are read with smaller loads that stay within them.
 
 use std::arch::wasm32::*;
 
@@ -40,8 +39,8 @@ fn non_ascii(bytes: &[u8], start: usize) -> usize {
 
     let len = bytes.len();
     // SAFETY: start < len is a verified ASCII prefix length, and each
-    // full-vector load stays within the input, the placeholder, or the mask
-    // table.
+    // full-vector load stays within the input, the short input's halves, or
+    // the mask table.
     unsafe {
         let mut sptr = bytes.as_ptr().add(start);
         let mut nb = len - start;
@@ -71,9 +70,8 @@ fn non_ascii(bytes: &[u8], start: usize) -> usize {
         }
 
         if len < LANES {
-            // The whole input is shorter than a vector: copied into a zeroed
-            // placeholder, as json-escape-simd does outside Linux and macOS.
-            let (v, keep) = short_vector!(sptr, nb, LANES, load);
+            // The whole input is shorter than a vector.
+            let (v, keep) = short_vector!(sptr, nb, load);
             return start + horizontal_sum_u8(v128_and(units!(v), keep));
         }
 

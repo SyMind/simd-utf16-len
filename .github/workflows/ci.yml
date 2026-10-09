@@ -21,8 +21,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
-      # Release builds let short inputs over-read within the page instead of
-      # copying, so test that path too.
+      # Optimizations change how the kernels compile, and debug assertions
+      # are off, so test release builds too.
       - run: cargo test --release
 
   wasm:

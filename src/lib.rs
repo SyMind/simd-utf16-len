@@ -8,8 +8,7 @@
 //!
 //! The NEON and simd128 kernels follow napi-rs/json-escape-simd's `src/simd`:
 //! a pointer cursor with a remaining-byte count, unrolled vectors per
-//! iteration, an in-register tail, and for inputs shorter than one vector a
-//! full-vector load that stays within the memory page instead of a copy.
+//! iteration, and an in-register tail.
 
 #[cfg(any(
     target_arch = "x86_64",
@@ -36,42 +35,73 @@ unsafe fn utf16_len_tail(bytes: &[u8], i: usize) -> usize {
     tail.encode_utf16().count()
 }
 
-/// The vector holding an input shorter than `$lanes` bytes from its last
-/// `nb` bytes on, and the mask of those `nb` lanes, as `$load` produces them.
-///
-/// A full-vector load forward from the last `nb` bytes can't fault when it
-/// stays within their page. Otherwise the vector that ends at the input's end
-/// starts before the input but within the same page, so it can't fault either.
-/// Debug builds, Miri, and wasm32 copy the bytes into a zeroed placeholder
-/// instead.
+/// The 16-byte vector holding an input's last `nb` bytes, with zeros after
+/// them, and the mask of those `nb` lanes, as `$load` produces them.
 ///
 /// Must be expanded inside an `unsafe` block, with `$sptr` pointing at the
-/// input's last `nb` bytes, `0 < nb < $lanes`, and `$lanes <= 64`.
+/// input's last `nb` bytes and `0 < nb < 16`.
 #[cfg(any(
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
 macro_rules! short_vector {
-    ($sptr:expr, $nb:expr, $lanes:expr, $load:expr) => {{
+    ($sptr:expr, $nb:expr, $load:expr) => {{
+        // Without the hint, LLVM lays this block out on the path of longer
+        // inputs, which measured them 10 to 18% slower on an M3 Max.
+        crate::cold();
         let (sptr, nb): (*const u8, usize) = ($sptr, $nb);
-        if crate::OVERREAD && crate::fits_in_page(sptr, $lanes) {
-            ($load(sptr), $load(crate::keep_first(nb)))
-        } else if crate::OVERREAD {
-            // Rare: the bytes end within a vector of their page's end. A
-            // branch, rather than selects, keeps the common case's registers
-            // free.
-            crate::cold();
-            (
-                $load(sptr.wrapping_add(nb).wrapping_sub($lanes)),
-                $load(crate::keep_last($lanes, nb)),
-            )
-        } else {
-            let mut placeholder = [0u8; $lanes];
-            std::ptr::copy_nonoverlapping(sptr, placeholder.as_mut_ptr(), nb);
-            ($load(placeholder.as_ptr()), $load(crate::keep_first(nb)))
-        }
+        let halves = crate::short_halves(sptr, nb);
+        (
+            $load(halves.as_ptr().cast::<u8>()),
+            $load(crate::keep_first(nb)),
+        )
     }};
 }
+
+/// The `nb` bytes at `p`, `0 < nb < 16`, as the two little-endian halves of
+/// a 16-byte vector, with zeros after the last byte. No read leaves the
+/// bytes: two overlapping reads of 8 or 4 bytes, with the overlap shifted
+/// out, or the first, middle, and last byte.
+///
+/// # Safety
+/// `p` must point at `nb` readable bytes.
+#[cfg(any(
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+#[inline(always)]
+unsafe fn short_halves(p: *const u8, nb: usize) -> [u64; 2] {
+    debug_assert!(0 < nb && nb < 16);
+    // SAFETY: each read below stays within the `nb` bytes at `p`.
+    let [lo, hi] = unsafe {
+        if nb >= 8 {
+            let first = u64::from_le(p.cast::<u64>().read_unaligned());
+            let last = u64::from_le(p.add(nb - 8).cast::<u64>().read_unaligned());
+            // Two shifts, since one shift by 64 would be out of range.
+            [first, last >> (8 * (15 - nb)) >> 8]
+        } else if nb >= 4 {
+            let first = u32::from_le(p.cast::<u32>().read_unaligned()) as u64;
+            let last = u32::from_le(p.add(nb - 4).cast::<u32>().read_unaligned()) as u64;
+            [first | ((last >> (8 * (8 - nb))) << 32), 0]
+        } else {
+            let first = *p as u64;
+            let middle = (*p.add(nb / 2) as u64) << (8 * (nb / 2));
+            let last = (*p.add(nb - 1) as u64) << (8 * (nb - 1));
+            [first | middle | last, 0]
+        }
+    };
+    [lo.to_le(), hi.to_le()]
+}
+
+/// Marks the block that calls it as unlikely, so LLVM lays it out after the
+/// others. The empty call itself is dropped.
+#[cfg(any(
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+#[cold]
+#[inline(never)]
+fn cold() {}
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -129,8 +159,8 @@ fn keep_last(lanes: usize, nb: usize) -> *const u8 {
     KEEP.as_ptr().wrapping_add(64 - lanes + nb)
 }
 
-/// A mask that is `0xFF` in only its first `nb` lanes, for a vector loaded
-/// forward from the last `nb` bytes.
+/// A mask that is `0xFF` in only its first `nb` lanes, for the vector that
+/// holds the last `nb` bytes in its first lanes.
 #[cfg(any(
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
@@ -139,48 +169,6 @@ fn keep_last(lanes: usize, nb: usize) -> *const u8 {
 fn keep_first(nb: usize) -> *const u8 {
     debug_assert!(0 < nb && nb < 64);
     KEEP.as_ptr().wrapping_add(128 - nb)
-}
-
-/// Whether an input shorter than one vector may be read with a full-vector
-/// load that reaches past its end, as napi-rs/json-escape-simd does on Linux
-/// and macOS, or past its start. Windows also protects memory in 4 KiB pages.
-/// The kernels only do so when the load stays within the input's page, so it
-/// can't fault. Debug builds and Miri copy into a buffer instead, since they
-/// would flag the read, and so does wasm32, whose linear memory has no page
-/// past its end.
-#[cfg(any(
-    target_arch = "aarch64",
-    all(target_arch = "wasm32", target_feature = "simd128"),
-))]
-const OVERREAD: bool = cfg!(all(
-    any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    ),
-    not(debug_assertions),
-    not(miri)
-));
-
-/// Marks the branch that calls it as rarely taken: the empty cold function
-/// keeps LLVM from turning the branch into selects, and the call itself is
-/// dropped.
-#[cfg(any(
-    target_arch = "aarch64",
-    all(target_arch = "wasm32", target_feature = "simd128"),
-))]
-#[cold]
-#[inline(never)]
-fn cold() {}
-
-/// Whether a `lanes`-byte load at `ptr` stays within one 4 KiB page.
-#[cfg(any(
-    target_arch = "aarch64",
-    all(target_arch = "wasm32", target_feature = "simd128"),
-))]
-#[inline(always)]
-fn fits_in_page(ptr: *const u8, lanes: usize) -> bool {
-    (ptr as usize & 4095) + lanes <= 4096
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -403,11 +391,9 @@ mod tests {
 
     #[test]
     fn short_inputs_at_page_edges() {
-        // Inputs shorter than a vector load a whole vector forward from their
-        // start when that stays within the page, otherwise backward from
-        // their end, or are copied in debug builds. Surround them with
-        // four-byte leaders, which would change the count if a load counted
-        // bytes outside the input, at every offset around a page boundary.
+        // Surround short inputs with four-byte leaders, which would change
+        // the count if a load counted bytes outside the input, at every
+        // offset around a page boundary.
         use std::alloc::{Layout, alloc, dealloc};
         const PAGE: usize = 4096;
         let layout = Layout::from_size_align(3 * PAGE, PAGE).unwrap();
