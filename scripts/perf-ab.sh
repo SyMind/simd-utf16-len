@@ -42,7 +42,9 @@ build_side() {
   rm -rf "$tree"
   mkdir -p "$tree/perf/ab"
   # Keep LF line endings, which Git on Windows would otherwise convert to CRLF.
-  git -C "$root" -c core.autocrlf=false archive "$2" | tar -x -C "$tree"
+  # `-m` dates the files now instead of at their commit, so cargo rebuilds a
+  # base that is older than the previous build in target/ab-build-<side>.
+  git -C "$root" -c core.autocrlf=false archive "$2" | tar -x -m -C "$tree"
   rm -rf "$tree/perf/ab"
   mkdir -p "$tree/perf/ab"
   cp "$root/perf/ab/Cargo.toml" "$tree/perf/ab/"
