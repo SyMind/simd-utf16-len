@@ -6,9 +6,9 @@
 //! - continuation bytes: `(byte & 0xC0) == 0x80`
 //! - four-byte leaders: `byte >= 0xF0`
 //!
-//! The NEON and simd128 kernels follow napi-rs/json-escape-simd's `src/simd`:
-//! a pointer cursor with a remaining-byte count, unrolled vectors per
-//! iteration, and an in-register tail.
+//! The SIMD kernels follow napi-rs/json-escape-simd's `src/simd`: a pointer
+//! cursor with a remaining-byte count, unrolled vectors per iteration, and an
+//! in-register tail.
 
 #[cfg(any(
     target_arch = "x86_64",
@@ -17,30 +17,13 @@
 ))]
 mod ascii;
 
-#[cfg(target_arch = "x86_64")]
-/// Count the tail after skipping continuation bytes at `i`.
-/// The caller has already counted each preceding leader's full UTF-16 contribution.
-///
-/// # Safety
-/// `bytes` must be valid UTF-8, and `i <= bytes.len()`.
-#[inline(always)]
-unsafe fn utf16_len_tail(bytes: &[u8], i: usize) -> usize {
-    let mut tail_start = i;
-    // SAFETY: the length check guards each byte access.
-    while tail_start < bytes.len() && (unsafe { *bytes.get_unchecked(tail_start) } & 0xC0) == 0x80 {
-        tail_start += 1;
-    }
-    // SAFETY: bytes is valid UTF-8, and tail_start <= bytes.len() is a char boundary.
-    let tail = unsafe { std::str::from_utf8_unchecked(bytes.get_unchecked(tail_start..)) };
-    tail.encode_utf16().count()
-}
-
 /// The 16-byte vector holding an input's last `nb` bytes, with zeros after
 /// them, and the mask of those `nb` lanes, as `$load` produces them.
 ///
 /// Must be expanded inside an `unsafe` block, with `$sptr` pointing at the
 /// input's last `nb` bytes and `0 < nb < 16`.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -66,6 +49,7 @@ macro_rules! short_vector {
 /// # Safety
 /// `p` must point at `nb` readable bytes.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -96,6 +80,7 @@ unsafe fn short_halves(p: *const u8, nb: usize) -> [u64; 2] {
 /// Marks the block that calls it as unlikely, so LLVM lays it out after the
 /// others. The empty call itself is dropped.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -125,6 +110,7 @@ mod scalar;
 /// pair. The kernels shuffle this by the high nibble, the way
 /// json-escape-simd's nibble-table classifier does.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -134,6 +120,7 @@ static UNITS_BY_HIGH_NIBBLE: [u8; 16] = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 
 /// bytes. `keep_last` and `keep_first` load a window of it, so the tail
 /// needs no runtime broadcast and compare.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -150,6 +137,7 @@ static KEEP: [u8; 192] = {
 /// A `lanes`-byte mask that is `0xFF` in only its last `nb` lanes, for the
 /// overlapping load of the last `lanes` bytes when only `nb` are uncounted.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]
@@ -162,6 +150,7 @@ fn keep_last(lanes: usize, nb: usize) -> *const u8 {
 /// A mask that is `0xFF` in only its first `nb` lanes, for the vector that
 /// holds the last `nb` bytes in its first lanes.
 #[cfg(any(
+    target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 ))]

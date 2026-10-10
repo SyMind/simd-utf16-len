@@ -34,7 +34,7 @@ Call `utf16_len(s)` directly when the ASCII status is unknown. If the caller alr
 
 | Architecture | SIMD | Instruction set |
 |-------------|------|-----------------|
-| x86_64 | SSE2 | Available by default on this architecture |
+| x86_64 | AVX2 / SSE2 | Runtime dispatch; SSE2 available by default on this architecture |
 | aarch64 | NEON | Available by default on this architecture |
 | wasm32 | simd128 | Requires `target_feature = "simd128"` |
 | Other | — | Falls back to `encode_utf16().count()` |
