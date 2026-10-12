@@ -9,7 +9,8 @@
 //! per iteration. Inputs with fewer than `WIDE_MIN` bytes after their ASCII
 //! prefix stay on the SSE2 kernel inlined into the dispatch: the AVX2
 //! kernel's call, upper-register cleanup, and wider reduction cost more than
-//! they save there.
+//! they save there. Inputs of `LONG_MIN` bytes or more skip the SSE2 ASCII
+//! scan: the AVX2 kernel skips their ASCII prefix itself.
 
 use std::arch::x86_64::*;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -25,17 +26,32 @@ const MAX_BATCH: usize = 30;
 /// Zen 4, and Granite Rapids.
 const WIDE_MIN: usize = 64;
 
+/// From this many bytes, the AVX2 kernel skips the ASCII prefix itself, 128
+/// bytes per iteration, and counts from the first block holding a non-ASCII
+/// byte, instead of the SSE2 scan's 64 bytes per iteration.
+const LONG_MIN: usize = 256;
+
 /// Compute the number of UTF-16 code units for UTF-8 string.
 ///
 /// Not inlined into callers yet: inlining it, and the SSE2 kernel with it,
 /// measured `mixed` and `cjk` 10 to 40% slower on Linux on Zen 3 with the
 /// same instructions, so the kernel's placement decides its speed. The
-/// kernels get restructured first; a later change inlines this. The ASCII
-/// scan and its early return are all this function holds; the rest is a
-/// tail call into `non_ascii`.
+/// kernels get restructured first; a later change inlines this. The length
+/// checks, the ASCII scan, and its early return are all this function holds;
+/// the rest is a tail call into `long` or `non_ascii`.
 pub fn utf16_len(s: &str) -> usize {
     let bytes = s.as_bytes();
-    let start = crate::ascii::ascii_prefix_len(bytes);
+    // Short inputs first, so they pay one length check, as before `long`:
+    // with the `LONG_MIN` check first, inputs of 11 to 53 bytes measured up
+    // to 19% slower on several x86_64 runners. Each branch inlines its own
+    // copy of the scan, which keeps only the path for its lengths.
+    let start = if bytes.len() < crate::ascii::BLOCK_MIN {
+        crate::ascii::ascii_prefix_len(bytes)
+    } else if bytes.len() >= LONG_MIN {
+        return long(bytes);
+    } else {
+        crate::ascii::ascii_prefix_len(bytes)
+    };
     if start == bytes.len() {
         start
     } else {
@@ -43,18 +59,43 @@ pub fn utf16_len(s: &str) -> usize {
     }
 }
 
+/// Counts an input of at least `LONG_MIN` bytes with the widest kernel this
+/// CPU supports; the AVX2 kernel skips the ASCII prefix at its own width.
+/// Kept out of line, like `non_ascii`.
+#[inline(never)]
+fn long(bytes: &[u8]) -> usize {
+    // SAFETY: bytes comes from a valid str of at least LONG_MIN bytes, SSE2
+    // is baseline on x86_64, and `detect` stores a kernel only after
+    // detecting its features.
+    unsafe {
+        match WIDE_KERNEL.load(Ordering::Relaxed) {
+            AVX2 => utf16_len_avx2_long(bytes),
+            SSE2 => {
+                let start = crate::ascii::ascii_prefix_len(bytes);
+                if start == bytes.len() {
+                    start
+                } else {
+                    utf16_len_sse2_long(bytes, start)
+                }
+            }
+            _ => detect_then_long(bytes),
+        }
+    }
+}
+
 /// Counts the bytes after the ASCII prefix: short inputs run the SSE2 kernel
 /// here, longer ones call the widest kernel this CPU supports, as in
 /// json-escape-simd's dispatch. Kept out of line: `utf16_len` holds only the
-/// ASCII scan and reaches this with a tail call. Every call from here is a
-/// tail call too, so none of them makes this save registers; on Windows it
-/// still saves xmm6 and xmm7, which the inlined SSE2 kernel uses.
+/// length check and the ASCII scan, and reaches this with a tail call. Every
+/// call from here is a tail call too, so none of them makes this save
+/// registers; on Windows it still saves xmm6 and xmm7, which the inlined SSE2
+/// kernel uses.
 #[inline(never)]
 fn non_ascii(bytes: &[u8], start: usize) -> usize {
     // SAFETY: bytes comes from a valid str, start is a verified ASCII prefix,
-    // SSE2 is baseline on x86_64, and `detect_then_count` stores a kernel
-    // only after detecting its features, so each wider kernel runs only when
-    // the CPU supports them.
+    // SSE2 is baseline on x86_64, and `detect` stores a kernel only after
+    // detecting its features, so each wider kernel runs only when the CPU
+    // supports them.
     unsafe {
         let nb = bytes.len() - start;
         if nb >= WIDE_MIN {
@@ -68,26 +109,41 @@ fn non_ascii(bytes: &[u8], start: usize) -> usize {
     }
 }
 
-/// The widest kernel this CPU supports, once `detect_then_count` has looked:
-/// `SSE2` or `AVX2`, and 0 before then. Keeping the selector here rather than
-/// asking `is_x86_feature_detected!` in `non_ascii` keeps the detection's
+/// The widest kernel this CPU supports, once `detect` has looked: `SSE2` or
+/// `AVX2`, and 0 before then. Keeping the selector here rather than asking
+/// `is_x86_feature_detected!` in `non_ascii` keeps the detection's
 /// initialization call, and the registers it would make `non_ascii` save on
 /// every input, in that cold function.
 static WIDE_KERNEL: AtomicU8 = AtomicU8::new(0);
 const SSE2: u8 = 1;
 const AVX2: u8 = 2;
 
-/// Detects the CPU's features once, then counts with the kernel they select.
+/// Detects the CPU's features once and stores the widest kernel they allow.
 #[cold]
 #[inline(never)]
-fn detect_then_count(bytes: &[u8], start: usize) -> usize {
+fn detect() {
     let kernel = if is_x86_feature_detected!("avx2") {
         AVX2
     } else {
         SSE2
     };
     WIDE_KERNEL.store(kernel, Ordering::Relaxed);
+}
+
+/// Detects the CPU's features once, then counts with the kernel they select.
+#[cold]
+#[inline(never)]
+fn detect_then_count(bytes: &[u8], start: usize) -> usize {
+    detect();
     non_ascii(bytes, start)
+}
+
+/// `detect_then_count` for `long`.
+#[cold]
+#[inline(never)]
+fn detect_then_long(bytes: &[u8]) -> usize {
+    detect();
+    long(bytes)
 }
 
 /// The SSE2 kernel out of line, for long inputs on CPUs without AVX2, so
@@ -138,6 +194,9 @@ fn sse2(s: &str) -> usize {
 
 fn avx2(s: &str) -> usize {
     // SAFETY: `kernels` only lists this after detecting AVX2.
+    if s.len() >= LONG_MIN {
+        return unsafe { utf16_len_avx2_long(s.as_bytes()) };
+    }
     with_kernel(s, |bytes, start| unsafe { utf16_len_avx2(bytes, start) })
 }
 
@@ -315,5 +374,39 @@ unsafe fn utf16_len_avx2(bytes: &[u8], start: usize) -> usize {
         );
         let sum = _mm_add_epi64(sum, _mm_srli_si128::<8>(sum));
         start + _mm_cvtsi128_si64(sum) as usize
+    }
+}
+
+/// The AVX2 kernel for long inputs: skips 128-byte blocks holding only
+/// ASCII, then counts from the first block that holds a non-ASCII byte. The
+/// block's ASCII bytes count one unit each like any other, so the kernel
+/// needs no exact prefix.
+///
+/// # Safety
+/// The CPU must support AVX2, and `bytes` must be valid UTF-8 of at least
+/// `LONG_MIN` bytes.
+#[target_feature(enable = "avx2")]
+unsafe fn utf16_len_avx2_long(bytes: &[u8]) -> usize {
+    const BLOCK: usize = 128;
+
+    let ptr = bytes.as_ptr();
+    let full = bytes.len() & !(BLOCK - 1);
+    let mut start = 0;
+    // SAFETY: the caller checked AVX2, and start + BLOCK <= full <=
+    // bytes.len() throughout the loop.
+    unsafe {
+        let load = |p: *const u8| _mm256_loadu_si256(p as *const __m256i);
+        while start < full {
+            let p = ptr.add(start);
+            let any = _mm256_or_si256(
+                _mm256_or_si256(load(p), load(p.add(32))),
+                _mm256_or_si256(load(p.add(64)), load(p.add(96))),
+            );
+            if _mm256_movemask_epi8(any) != 0 {
+                break;
+            }
+            start += BLOCK;
+        }
+        utf16_len_avx2(bytes, start)
     }
 }
