@@ -10,6 +10,10 @@ autobenches = false
 
 [dependencies]
 
+[features]
+# Opt in to the AVX-512BW kernel on x86_64, as in napi-rs/json-escape-simd.
+avx512 = []
+
 # Criterion doesn't build for wasm32, and the unit tests don't need it.
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "4.7" }

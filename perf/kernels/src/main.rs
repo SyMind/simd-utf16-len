@@ -2,8 +2,9 @@
 //! non-ASCII inputs of increasing size, to show where a wider kernel starts
 //! to pay off.
 //!
-//! Run `cargo run --release --manifest-path perf/kernels/Cargo.toml`, or the
-//! Kernel sweep workflow, which does so on every runner.
+//! Run `cargo run --release --manifest-path perf/kernels/Cargo.toml`, with
+//! `--features avx512` to include the AVX-512 kernel, or the Kernel sweep
+//! workflow, which does both on every runner.
 
 use std::fmt::Write as _;
 use std::hint::black_box;

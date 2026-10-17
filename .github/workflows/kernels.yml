@@ -29,4 +29,4 @@ jobs:
           # Same function and loop alignment as scripts/perf-ab.sh, so code
           # placement doesn't bias the results.
           RUSTFLAGS: -C llvm-args=-align-all-functions=${{ startsWith(matrix.os, 'windows') && '12' || '14' }} -C llvm-args=-align-loops=64
-        run: cargo run --release --quiet --manifest-path perf/kernels/Cargo.toml
+        run: cargo run --release --quiet --manifest-path perf/kernels/Cargo.toml --features avx512

@@ -6,3 +6,6 @@ publish = false
 
 [dependencies]
 simd-utf16-len = { path = "../.." }
+
+[features]
+avx512 = ["simd-utf16-len/avx512"]
