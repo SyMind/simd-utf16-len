@@ -53,42 +53,42 @@ fn std_guard_len(s: &str) -> usize {
 }
 ```
 
-Results below are from [run 34220758753](https://github.com/SyMind/simd-utf16-len/actions/runs/34220758753) on **2026-09-08**, at commit [`a241509`](https://github.com/SyMind/simd-utf16-len/commit/a2415096978d0d3923d16fdf0711963a079f7506), using Rust **1.98.1**. Each measurement uses 1,000 warmup iterations followed by 10 samples of 10,000 iterations; the example reports the middle sorted sample as nanoseconds per iteration. Speedup is the baseline time divided by the SIMD time, as reported by the example.
+Results below are from [run 39534553692](https://github.com/SyMind/simd-utf16-len/actions/runs/39534553692) on **2026-10-21**, at commit [`ae1e4ff`](https://github.com/SyMind/simd-utf16-len/commit/ae1e4ffdc0a49e439440f32987d07a430d41f07d), the 0.3.0 release, using Rust **1.99.1** and default features. Each measurement uses 1,000 warmup iterations followed by 10 samples of 10,000 iterations; the example reports the middle sorted sample as nanoseconds per iteration. Speedup is the baseline time divided by the SIMD time, as reported by the example.
 
-These historical results predate the standard-library-aligned ASCII scanner; they do not describe the current ASCII path. For this run, the 169-byte ASCII input was **1.5–2.4x faster** than the ASCII guard, and the non-ASCII inputs were **8.8–13.1x faster** than the same baseline. Results depend on input length, character distribution, CPU, and compiler; these ratios do not establish a speedup for every string or platform.
+For this run, the 169-byte ASCII input was **1.6–4.4x faster** than the ASCII guard, and the non-ASCII inputs were **15.8–24.0x faster** than the same baseline. Results depend on input length, character distribution, CPU, and compiler; these ratios do not establish a speedup for every string or platform. Hosted runners also vary from run to run: the Linux and Windows jobs land on different AMD EPYC models, and on macOS the first inputs measured, `ascii` and `cjk`, have taken up to 3x longer in other runs of the same code.
 
 ### Linux x86_64
 
-CPU: AMD EPYC 7763 64-Core Processor. [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/34220758753/job/102043054326).
+CPU: AMD EPYC 9V74 80-Core Processor. [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/39534553692/job/119008064449).
 
 | Input | Bytes | SIMD (ns/iter) | std guard (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------------:|--------:|
-| ascii |   169 |            6.8 |                16.4 |    2.4x |
-| cjk   |   194 |            9.9 |                91.0 |    9.2x |
-| emoji |   170 |            9.9 |               105.1 |   10.6x |
-| mixed |   144 |            8.0 |               101.7 |   12.7x |
+| ascii |   169 |            3.0 |                13.3 |    4.4x |
+| cjk   |   194 |            6.0 |               110.5 |   18.5x |
+| emoji |   170 |            5.7 |                91.6 |   16.1x |
+| mixed |   144 |            5.1 |                81.3 |   15.8x |
 
 ### macOS aarch64
 
-CPU: Apple M1 (Virtual). [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/34220758753/job/102043053876).
+CPU: Apple M1 (Virtual). [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/39534553692/job/119008064417).
 
 | Input | Bytes | SIMD (ns/iter) | std guard (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------------:|--------:|
-| ascii |   169 |            6.1 |                 9.2 |    1.5x |
-| cjk   |   194 |            8.5 |                92.0 |   10.8x |
-| emoji |   170 |           11.5 |               101.1 |    8.8x |
-| mixed |   144 |            7.3 |                96.1 |   13.1x |
+| ascii |   169 |            3.1 |                 5.1 |    1.6x |
+| cjk   |   194 |            5.7 |               137.5 |   24.0x |
+| emoji |   170 |            6.2 |               121.1 |   19.6x |
+| mixed |   144 |            4.7 |               101.2 |   21.4x |
 
 ### Windows x86_64
 
-CPU: AMD EPYC 7763 64-Core Processor. [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/34220758753/job/102043054189).
+CPU: AMD EPYC 9V74 80-Core Processor. [Job output](https://github.com/SyMind/simd-utf16-len/actions/runs/39534553692/job/119008064256).
 
 | Input | Bytes | SIMD (ns/iter) | std guard (ns/iter) | Speedup |
 |-------|------:|---------------:|--------------------:|--------:|
-| ascii |   169 |            8.4 |                16.4 |    2.0x |
-| cjk   |   194 |           10.8 |               111.8 |   10.3x |
-| emoji |   170 |           10.8 |               113.3 |   10.5x |
-| mixed |   144 |            9.0 |               106.6 |   11.9x |
+| ascii |   169 |            4.8 |                15.3 |    3.2x |
+| cjk   |   194 |            7.0 |               140.3 |   19.9x |
+| emoji |   170 |            6.8 |               111.1 |   16.4x |
+| mixed |   144 |            6.0 |                94.4 |   15.8x |
 
 ### Reproduce locally
 
