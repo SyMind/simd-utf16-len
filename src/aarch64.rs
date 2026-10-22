@@ -17,6 +17,21 @@ use std::arch::aarch64::*;
 /// room for 3 leftover vectors and the tail: 240 + 3 * 2 + 2 = 248 < 256.
 const MAX_BATCH: usize = 30;
 
+/// Sum of a vector's sixteen byte lanes.
+///
+/// # Safety
+/// NEON is baseline on aarch64.
+#[inline(always)]
+unsafe fn sum_byte_lanes(v: uint8x16_t) -> usize {
+    // `vaddlvq_u8` has no Miri shim (llvm.aarch64.neon.uaddlv); the
+    // vpadalq/vaddvq formulation is bit-identical.
+    #[cfg(not(miri))]
+    let sum = unsafe { vaddlvq_u8(v) as usize };
+    #[cfg(miri)]
+    let sum = unsafe { vaddvq_u32(vpadalq_u16(vdupq_n_u32(0), vpaddlq_u8(v))) as usize };
+    sum
+}
+
 /// Compute the number of UTF-16 code units for UTF-8 string using NEON.
 #[inline]
 pub fn utf16_len(s: &str) -> usize {
@@ -29,6 +44,30 @@ pub fn utf16_len(s: &str) -> usize {
         // prefix shorter than it.
         unsafe { utf16_len_neon(bytes, start) }
     }
+}
+
+/// One batch's merged byte lanes, widened pairwise into the running 64-bit
+/// total. Each u64 lane counts only its own eight byte lanes' units, so it
+/// stays below the input's length and cannot wrap for any input a `&str`
+/// can hold. Factored out so the regression tests drive the production
+/// accumulation, not a copy of it.
+///
+/// # Safety
+/// NEON is baseline on aarch64.
+#[inline(always)]
+unsafe fn widen_into_total(total: uint64x2_t, merged: uint8x16_t) -> uint64x2_t {
+    unsafe { vpadalq_u32(total, vpaddlq_u16(vpaddlq_u8(merged))) }
+}
+
+/// The full count: the ASCII prefix, the residual merged byte lanes, and
+/// the batch total, reduced in 64 bits. Factored out with `widen_into_total`
+/// so the regression tests drive the production reduction, not a copy of it.
+///
+/// # Safety
+/// NEON is baseline on aarch64.
+#[inline(always)]
+unsafe fn combine(start: usize, merged: uint8x16_t, total: uint64x2_t) -> usize {
+    unsafe { start + sum_byte_lanes(merged) + vaddvq_u64(total) as usize }
 }
 
 /// A function of its own, but always inlined: a caller that inlines
@@ -71,7 +110,7 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
         if len < LANES {
             // The whole input is shorter than a vector.
             let (v, keep) = short_vector!(sptr, nb, vld1q_u8);
-            return start + vaddlvq_u8(vandq_u8(units!(v), keep)) as usize;
+            return start + sum_byte_lanes(vandq_u8(units!(v), keep));
         }
 
         if nb < CHUNK {
@@ -85,7 +124,7 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
             if nb > 0 {
                 acc = vaddq_u8(acc, tail_units!());
             }
-            return start + vaddlvq_u8(acc) as usize;
+            return start + sum_byte_lanes(acc);
         }
 
         macro_rules! merge {
@@ -94,8 +133,10 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
             };
         }
 
-        // Sums of full batches, widened to u32 lanes without a horizontal add.
-        let mut total = vdupq_n_u32(0);
+        // Sums of full batches, as two u64 lanes without a horizontal add:
+        // u32 lanes and a u32 reduction returned the count modulo 2^32 for
+        // inputs past 4,294,968,959 units.
+        let mut total = vdupq_n_u64(0);
         let (mut a0, mut a1, mut a2, mut a3) = (zero, zero, zero, zero);
         macro_rules! chunk {
             () => {
@@ -112,8 +153,8 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
                 chunk!();
             }
             nb -= CHUNK * MAX_BATCH;
-            // More follows: widen now so the lanes can't overflow.
-            total = vpadalq_u16(total, vpaddlq_u8(merge!(a0, a1, a2, a3)));
+            // More follows: widen now so the byte lanes can't overflow.
+            total = widen_into_total(total, merge!(a0, a1, a2, a3));
             (a0, a1, a2, a3) = (zero, zero, zero, zero);
         }
         // Fewer than MAX_BATCH iterations remain.
@@ -130,6 +171,75 @@ unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
             a1 = vaddq_u8(a1, tail_units!());
         }
 
-        start + vaddlvq_u8(merge!(a0, a1, a2, a3)) as usize + vaddvq_u32(total) as usize
+        combine(start, merge!(a0, a1, a2, a3), total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The merged byte lanes of one full batch of the review's Section-4.2
+    /// counterexample (a leading U+00E9, then ASCII): every lane of a real
+    /// ASCII batch holds 30 * 4 = 120 units, and the first batch's first
+    /// lane loses one unit to the two-byte leader, so the pairwise u32 sums
+    /// are [479, 480, 480, 480] for the first batch and [480, 480, 480, 480]
+    /// for every later one, as the exact arithmetic model computes.
+    const FIRST_BATCH: [u8; 16] = {
+        let mut lanes = [120; 16];
+        lanes[0] = 119;
+        lanes
+    };
+    const ASCII_BATCH: [u8; 16] = [120; 16];
+
+    fn merged(lanes: &[u8; 16]) -> uint8x16_t {
+        // SAFETY: the array holds 16 readable bytes, and NEON is baseline.
+        unsafe { vld1q_u8(lanes.as_ptr()) }
+    }
+
+    fn widen(total: uint64x2_t, lanes: &[u8; 16]) -> uint64x2_t {
+        // SAFETY: NEON is baseline on aarch64.
+        unsafe { widen_into_total(total, merged(lanes)) }
+    }
+
+    /// `FIRST_BATCH` once and `ASCII_BATCH` `batches - 1` times, counted
+    /// through the production widening fold and final combine.
+    fn counted(batches: usize) -> usize {
+        // SAFETY: NEON is baseline on aarch64.
+        let mut total = widen(unsafe { vdupq_n_u64(0) }, &FIRST_BATCH);
+        for _ in 1..batches {
+            total = widen(total, &ASCII_BATCH);
+        }
+        // SAFETY: NEON is baseline on aarch64.
+        unsafe { combine(0, merged(&[0; 16]), total) }
+    }
+
+    /// The Section-4.2 counterexample without its 4 GiB allocation: the
+    /// exact total exceeds u32::MAX, so a 32-bit final reduction of these
+    /// batches returned 1,663.
+    #[test]
+    fn batch_total_survives_a_wrapping_u32_sum() {
+        assert_eq!(counted(2_236_963), 4_294_968_959);
+    }
+
+    /// The model's second case: 8,947,849 batches push every former u32
+    /// lane itself over u32::MAX, so even widening only the final reduction
+    /// of 32-bit lanes returned 895.
+    #[test]
+    fn batch_total_survives_wrapping_u32_lanes() {
+        assert_eq!(counted(8_947_849), 17_179_870_079);
+    }
+
+    /// The final combine still adds the ASCII prefix and the residual
+    /// merged byte lanes, which the huge totals above leave at zero.
+    #[test]
+    fn combine_adds_prefix_and_residual() {
+        let mut residual = [0u8; 16];
+        residual[0] = 7;
+        residual[15] = 3;
+        // SAFETY: NEON is baseline on aarch64.
+        let total = widen(unsafe { vdupq_n_u64(0) }, &ASCII_BATCH);
+        // SAFETY: NEON is baseline on aarch64.
+        assert_eq!(unsafe { combine(5, merged(&residual), total) }, 5 + 10 + 1920);
     }
 }

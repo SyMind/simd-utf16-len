@@ -1,0 +1,35 @@
+name: ASan
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  asan:
+    name: ASan (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    env:
+      RUSTFLAGS: -Zsanitizer=address
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      # Default crate features only: the AVX-512 kernel is opt-in, and the
+      # Intel SDE emulator ci.yml uses for it cannot run an ASan-instrumented
+      # binary, so x86_64 exercises SSE2/AVX2 under the runner's native
+      # runtime detection. -Zbuild-std recompiles std with the sanitizer;
+      # --tests includes the guard-page and exact-allocation integration
+      # tests, whose whole point is to fault on any overread.
+      - run: cargo test -Zbuild-std --target ${{ matrix.target }} --tests
+      - run: cargo test -Zbuild-std --target ${{ matrix.target }} --tests --release

@@ -18,6 +18,10 @@ avx512 = []
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
 criterion = { package = "codspeed-criterion-compat", version = "4.7" }
 
+# tests/guard_pages.rs maps guard pages with mmap/mprotect.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2.191"
+
 [[bench]]
 name = "utf16_len"
 harness = false
