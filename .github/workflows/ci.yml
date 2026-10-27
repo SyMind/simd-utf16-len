@@ -56,8 +56,10 @@ jobs:
       - uses: petarpetrovt/setup-sde@v6.0
       # Most runners don't expose AVX-512, so emulate a Sapphire Rapids CPU,
       # which has it, and require every x86_64 kernel to run, in debug and
-      # release builds.
-      - run: cargo test --lib --features avx512 && cargo test --lib --release --features avx512
+      # release builds. `--tests` (not just `--lib`) so the guard-page and
+      # exact-allocation integration tests also exercise the AVX-512 kernel's
+      # masked loads.
+      - run: cargo test --tests --features avx512 && cargo test --tests --release --features avx512
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER: ${{ env.SDE_PATH }}/sde64 -spr --
           SIMD_UTF16_LEN_EXPECT_KERNELS: sse2,avx2,avx512

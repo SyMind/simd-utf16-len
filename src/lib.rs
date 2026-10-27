@@ -419,6 +419,23 @@ mod tests {
         unsafe { dealloc(buf, layout) };
     }
 
+    /// The review's Section-4.2 counterexample against the production
+    /// kernels: a leading U+00E9, then ASCII up to 4,294,968,960 bytes
+    /// (1,920 * 2,236,963, an exact NEON batch multiple, so no residual
+    /// vectors). The former 32-bit NEON total returned 1,663 here.
+    // 64-bit only: its byte length does not fit a 32-bit usize, and only
+    // 64-bit targets can hand the kernels such an input anyway.
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    #[ignore = "allocates a 4 GiB string"]
+    fn huge_input_total_above_u32() {
+        let mut s = String::with_capacity(4_294_968_960);
+        s.push('\u{e9}');
+        s.extend(std::iter::repeat_n('a', 4_294_968_958));
+        assert_eq!(s.len(), 4_294_968_960);
+        assert_eq!(utf16_len(&s), 4_294_968_959);
+    }
+
     #[test]
     fn non_ascii_after_ascii_prefix() {
         for prefix_len in (0..=129).chain([2031, 2032, 2033, 4079, 4080, 4081, 4095, 4096, 4097]) {

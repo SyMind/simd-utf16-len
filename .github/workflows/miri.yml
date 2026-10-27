@@ -1,0 +1,63 @@
+name: Miri
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  miri:
+    name: Miri (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            expect: sse2,avx2
+            # Miri's cpuid shim reports AVX2 only with +avx2, so without it
+            # only the SSE2 kernel would ever run.
+            rustflags: -C target-feature=+avx2
+            skips: --skip non_ascii_after_ascii_prefix
+          - target: aarch64-apple-darwin
+            expect: neon
+            rustflags: ""
+            # Plus the two batch_total models: their millions of interpreted
+            # widening iterations measured ~3.5 and ~13.5 minutes wall on an
+            # M5 Max, and they assert widening arithmetic only, with no
+            # memory-safety surface for Miri to check.
+            skips: --skip non_ascii_after_ascii_prefix --skip aarch64::tests::batch_total
+    env:
+      # Target choice: both SIMD hosts are fully interpretable — Miri
+      # interprets, so the triple need not match the host. The NEON kernel's
+      # one unshimmed intrinsic, vaddlvq_u8 (llvm.aarch64.neon.uaddlv), has a
+      # bit-identical cfg(miri) reduction in src/aarch64.rs; the UDOT, CSSC,
+      # and SME candidate kernels that would hit further shim gaps were
+      # measured and rejected, so the shipped neon kernel runs end to end
+      # under Miri.
+      #
+      # MIRIFLAGS: -Zmiri-disable-isolation lets the kernel-availability test
+      # read SIMD_UTF16_LEN_EXPECT_KERNELS, so a future Miri that stops
+      # covering SSE2, AVX2, or NEON fails loudly instead of silently running
+      # less kernel code.
+      MIRIFLAGS: -Zmiri-disable-isolation
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      SIMD_UTF16_LEN_EXPECT_KERNELS: ${{ matrix.expect }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      # Validated on an Apple M5 Max with cargo 1.101.0-nightly (2026-10-07):
+      # both commands green on both targets, ~2 minutes of interpretation per
+      # leg once the sysroot is cached; the aarch64 leg also re-ran green in
+      # an ubuntu:24.04 container. The lib suite skips
+      # non_ascii_after_ascii_prefix: its ~78k kernel invocations exceed 15
+      # minutes under interpretation, and its boundary coverage overlaps
+      # tests/exact_allocations.rs, which sweeps every length 0..=256 plus
+      # every kernel's batch boundary against exactly-sized allocations in
+      # seconds. The skipped tests still run in ci.yml and under the ASan
+      # workflow at native speed.
+      - run: cargo miri test --target ${{ matrix.target }} --lib -- ${{ matrix.skips }}
+      - run: cargo miri test --target ${{ matrix.target }} --test exact_allocations
