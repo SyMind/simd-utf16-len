@@ -16,7 +16,7 @@ fn bench_kernels(c: &mut Criterion) {
     for kernel in __kernels::available() {
         for (name, input) in &inputs {
             group.bench_function(BenchmarkId::new(*name, kernel.name), |b| {
-                b.iter(|| (kernel.utf16_len)(black_box(input.as_str())));
+                b.iter(|| (kernel.utf16_len)(black_box(input.as_bytes())));
             });
         }
     }

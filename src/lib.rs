@@ -161,20 +161,55 @@ fn keep_first(nb: usize) -> *const u8 {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::utf16_len;
+use x86_64 as arch;
 
 #[cfg(target_arch = "aarch64")]
-pub use aarch64::utf16_len;
+use aarch64 as arch;
 
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub use wasm32::utf16_len;
+use wasm32 as arch;
 
 #[cfg(not(any(
     target_arch = "x86_64",
     target_arch = "aarch64",
     all(target_arch = "wasm32", target_feature = "simd128"),
 )))]
-pub use scalar::utf16_len;
+use scalar as arch;
+
+/// Compute the number of UTF-16 code units in a UTF-8 string, the same
+/// count as `s.encode_utf16().count()`.
+///
+/// ```
+/// use simd_utf16_len::utf16_len;
+///
+/// assert_eq!(utf16_len("Hello, 世界! 🌍"), 13);
+/// ```
+#[inline]
+pub fn utf16_len(s: &str) -> usize {
+    arch::utf16_len(s.as_bytes())
+}
+
+/// Compute the number of UTF-16 code units in UTF-8 `bytes`, without
+/// checking that they are UTF-8.
+///
+/// The result is only accurate for valid UTF-8: then it equals
+/// [`utf16_len`] of the same bytes as a `str`. For any other bytes it is
+/// unspecified, and in particular is not the length of a lossy decoding
+/// such as [`String::from_utf8_lossy`], but the call is still safe and
+/// never panics or reads outside `bytes`.
+///
+/// Use it when the bytes are known to be UTF-8 but aren't held as a `str`,
+/// and checking them again would cost more than counting.
+///
+/// ```
+/// use simd_utf16_len::utf16_len_bytes;
+///
+/// assert_eq!(utf16_len_bytes("Hello, 世界! 🌍".as_bytes()), 13);
+/// ```
+#[inline]
+pub fn utf16_len_bytes(bytes: &[u8]) -> usize {
+    arch::utf16_len(bytes)
+}
 
 /// The kernels behind `utf16_len`, for this crate's tests and benchmarks.
 /// Not part of the public API.
@@ -183,10 +218,11 @@ pub mod __kernels {
     /// One kernel, including the ASCII prefix scan that runs before it.
     pub struct Kernel {
         pub name: &'static str,
-        pub utf16_len: fn(&str) -> usize,
+        pub utf16_len: fn(&[u8]) -> usize,
     }
 
     /// Every kernel this CPU supports, ending with the one `utf16_len` runs.
+    /// Each counts any bytes, so tests can check that they agree off UTF-8.
     pub fn available() -> Vec<Kernel> {
         #[cfg(target_arch = "x86_64")]
         {
@@ -222,18 +258,28 @@ pub mod __kernels {
 
 #[cfg(test)]
 mod tests {
-    /// `crate::utf16_len`, after checking that every kernel this CPU supports
-    /// agrees with it, so each test below covers all of them.
+    /// `crate::utf16_len`, after checking that `utf16_len_bytes` and every
+    /// kernel this CPU supports agree with it, so each test below covers all
+    /// of them.
     #[track_caller]
     fn utf16_len(s: &str) -> usize {
         let result = super::utf16_len(s);
+        assert_eq!(utf16_len_bytes(s.as_bytes()), result);
+        result
+    }
+
+    /// `crate::utf16_len_bytes`, after checking that every kernel this CPU
+    /// supports agrees with it.
+    #[track_caller]
+    fn utf16_len_bytes(bytes: &[u8]) -> usize {
+        let result = super::utf16_len_bytes(bytes);
         for kernel in super::__kernels::available() {
             assert_eq!(
-                (kernel.utf16_len)(s),
+                (kernel.utf16_len)(bytes),
                 result,
                 "{} kernel disagrees on {} bytes",
                 kernel.name,
-                s.len()
+                bytes.len()
             );
         }
         result
@@ -434,6 +480,55 @@ mod tests {
         s.extend(std::iter::repeat_n('a', 4_294_968_958));
         assert_eq!(s.len(), 4_294_968_960);
         assert_eq!(utf16_len(&s), 4_294_968_959);
+    }
+
+    #[test]
+    fn invalid_utf8_counts_the_same_everywhere() {
+        // Bytes that are not UTF-8 have no specified count, but every kernel,
+        // and the scalar formula they all compute, should agree on them: lone
+        // continuation bytes, truncated and overlong sequences, surrogates,
+        // and 0xF8..=0xFF, at every length around the vector and batch sizes.
+        // Four offsets rather than sixteen keep this short under Miri.
+        let formula = |bytes: &[u8]| -> usize {
+            bytes
+                .iter()
+                .map(|&b| 1 + (b >= 0xF0) as usize - ((b & 0xC0) == 0x80) as usize)
+                .sum()
+        };
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let noise: Vec<u8> = (0..4200)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        for offset in [0, 1, 7, 15] {
+            for len in (0..=300).chain([1919, 1920, 1921, 3840, 3841, 4096]) {
+                let bytes = &noise[offset..offset + len];
+                assert_eq!(
+                    utf16_len_bytes(bytes),
+                    formula(bytes),
+                    "offset: {offset}, len: {len}"
+                );
+            }
+        }
+        for bytes in [
+            &b"\x80"[..],
+            b"\xff",
+            b"\xc3",
+            b"\xe4\xb8",
+            b"\xf0\x9f\xa6",
+            b"\xc0\xaf",
+            b"\xed\xa0\x80",
+            b"\xf8\x88\x80\x80\x80",
+        ] {
+            let padded = [&b"a".repeat(70)[..], bytes].concat();
+            for input in [bytes, &padded] {
+                assert_eq!(utf16_len_bytes(input), formula(input), "bytes: {input:x?}");
+            }
+        }
     }
 
     #[test]
