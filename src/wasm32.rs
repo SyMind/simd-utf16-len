@@ -17,10 +17,9 @@ use std::arch::wasm32::*;
 /// room for 3 leftover vectors and the tail: 240 + 3 * 2 + 2 = 248 < 256.
 const MAX_BATCH: usize = 30;
 
-/// Compute the number of UTF-16 code units for UTF-8 string using WASM SIMD128.
+/// Compute the number of UTF-16 code units for UTF-8 bytes using WASM SIMD128.
 #[inline]
-pub fn utf16_len(s: &str) -> usize {
-    let bytes = s.as_bytes();
+pub(crate) fn utf16_len(bytes: &[u8]) -> usize {
     let start = crate::ascii::ascii_prefix_len(bytes);
     if start == bytes.len() {
         start
