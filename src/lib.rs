@@ -97,11 +97,15 @@ mod aarch64;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 mod wasm32;
 
-#[cfg(not(any(
-    target_arch = "x86_64",
-    target_arch = "aarch64",
-    all(target_arch = "wasm32", target_feature = "simd128"),
-)))]
+// Also built for tests everywhere, as the per-byte reference for the kernels.
+#[cfg(any(
+    test,
+    not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    ))
+))]
 mod scalar;
 
 /// UTF-16 code units each byte contributes, by its high nibble: ASCII bytes
@@ -482,19 +486,42 @@ mod tests {
         assert_eq!(utf16_len(&s), 4_294_968_959);
     }
 
+    /// The scalar fallback, which counts each byte by the crate's formula,
+    /// as the reference for bytes that are not UTF-8.
+    use super::scalar::utf16_len as per_byte;
+
+    // It isn't that the results here are 'correct', for invalid utf8 there is no 'correct', it is just that they are consistent and memory safe.
     #[test]
-    fn invalid_utf8_counts_the_same_everywhere() {
-        // Bytes that are not UTF-8 have no specified count, but every kernel,
-        // and the scalar formula they all compute, should agree on them: lone
-        // continuation bytes, truncated and overlong sequences, surrogates,
-        // and 0xF8..=0xFF, at every length around the vector and batch sizes.
-        // Four offsets rather than sixteen keep this short under Miri.
-        let formula = |bytes: &[u8]| -> usize {
-            bytes
-                .iter()
-                .map(|&b| 1 + (b >= 0xF0) as usize - ((b & 0xC0) == 0x80) as usize)
-                .sum()
-        };
+    fn invalid_utf8_matches_per_byte() {
+        // Lone continuation bytes, truncated sequences, and bytes no UTF-8
+        // holds, alone, after an ASCII prefix the kernels skip, and repeated
+        // past the vector widths.
+        let long = [b"x\x80\xC3\xE2\x80\xF0\x9F\xA6\xFF\xFE".as_slice(); 32].concat();
+        for bytes in [
+            b"\x80".as_slice(),
+            b"\xC3",
+            b"\xE2\x80",
+            b"\xF0\x9F\xA6",
+            b"\xFF\xFE",
+            b"abc\xF0",
+            // Overlong, surrogate, and five-byte forms.
+            b"\xC0\xAF",
+            b"\xED\xA0\x80",
+            b"\xF8\x88\x80\x80\x80",
+            &long,
+            &long[1..],
+        ] {
+            let padded = [&b"a".repeat(70)[..], bytes].concat();
+            for bytes in [bytes, &padded] {
+                assert_eq!(utf16_len_bytes(bytes), per_byte(bytes), "{bytes:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn random_bytes_match_per_byte() {
+        // Mostly invalid UTF-8, at every length around the vector and batch
+        // sizes. Four offsets rather than sixteen keep this short under Miri.
         let mut state = 0x9E37_79B9_7F4A_7C15_u64;
         let noise: Vec<u8> = (0..4200)
             .map(|_| {
@@ -509,24 +536,9 @@ mod tests {
                 let bytes = &noise[offset..offset + len];
                 assert_eq!(
                     utf16_len_bytes(bytes),
-                    formula(bytes),
+                    per_byte(bytes),
                     "offset: {offset}, len: {len}"
                 );
-            }
-        }
-        for bytes in [
-            &b"\x80"[..],
-            b"\xff",
-            b"\xc3",
-            b"\xe4\xb8",
-            b"\xf0\x9f\xa6",
-            b"\xc0\xaf",
-            b"\xed\xa0\x80",
-            b"\xf8\x88\x80\x80\x80",
-        ] {
-            let padded = [&b"a".repeat(70)[..], bytes].concat();
-            for input in [bytes, &padded] {
-                assert_eq!(utf16_len_bytes(input), formula(input), "bytes: {input:x?}");
             }
         }
     }
