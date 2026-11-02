@@ -196,11 +196,9 @@ pub fn utf16_len(s: &str) -> usize {
 /// Compute the number of UTF-16 code units in UTF-8 `bytes`, without
 /// checking that they are UTF-8.
 ///
-/// The result is only accurate for valid UTF-8: then it equals
-/// [`utf16_len`] of the same bytes as a `str`. For any other bytes it is
-/// unspecified, and in particular is not the length of a lossy decoding
-/// such as [`String::from_utf8_lossy`], but the call is still safe and
-/// never panics or reads outside `bytes`.
+/// The result is only accurate for valid UTF-8: then it equals [`utf16_len`]
+/// of the same bytes as a `str`. For any other bytes the return value is
+/// undefined but the call is still safe.
 ///
 /// Use it when the bytes are known to be UTF-8 but aren't held as a `str`,
 /// and checking them again would cost more than counting.
