@@ -37,7 +37,7 @@ const WIDE_MIN: usize = 64;
 /// than they save on shorter ones.
 const LONG_MIN: usize = 256;
 
-/// Compute the number of UTF-16 code units for UTF-8 string.
+/// Compute the number of UTF-16 code units for UTF-8 bytes.
 ///
 /// Not inlined into callers yet: inlining it, and the SSE2 kernel with it,
 /// measured `mixed` and `cjk` 10 to 40% slower on Linux on Zen 3 with the
@@ -45,8 +45,7 @@ const LONG_MIN: usize = 256;
 /// kernels get restructured first; a later change inlines this. The length
 /// checks, the ASCII scan, and its early return are all this function holds;
 /// the rest is a tail call into `long` or `non_ascii`.
-pub fn utf16_len(s: &str) -> usize {
-    let bytes = s.as_bytes();
+pub(crate) fn utf16_len(bytes: &[u8]) -> usize {
     // Short inputs first, so they pay one length check, as before `long`:
     // with the `LONG_MIN` check first, inputs of 11 to 53 bytes measured up
     // to 19% slower on several x86_64 runners. Each branch inlines its own
@@ -70,9 +69,8 @@ pub fn utf16_len(s: &str) -> usize {
 /// line, like `non_ascii`.
 #[inline(never)]
 fn long(bytes: &[u8]) -> usize {
-    // SAFETY: bytes comes from a valid str of at least LONG_MIN bytes, SSE2
-    // is baseline on x86_64, and `detect` stores a kernel only after
-    // detecting its features.
+    // SAFETY: bytes holds at least LONG_MIN bytes, SSE2 is baseline on
+    // x86_64, and `detect` stores a kernel only after detecting its features.
     unsafe {
         match LONG_KERNEL.load(Ordering::Relaxed) {
             #[cfg(feature = "avx512")]
@@ -100,10 +98,10 @@ fn long(bytes: &[u8]) -> usize {
 /// kernel uses.
 #[inline(never)]
 fn non_ascii(bytes: &[u8], start: usize) -> usize {
-    // SAFETY: bytes comes from a valid str, start is a verified ASCII prefix,
-    // SSE2 is baseline on x86_64, and `detect` stores a kernel only after
-    // detecting its features, so each wider kernel runs only when the CPU
-    // supports them.
+    // SAFETY: start is a verified ASCII prefix shorter than bytes, SSE2 is
+    // baseline on x86_64, and `detect` stores a kernel only after detecting
+    // its features, so each wider kernel runs only when the CPU supports
+    // them.
     unsafe {
         let nb = bytes.len() - start;
         if nb >= WIDE_MIN {
@@ -201,7 +199,8 @@ fn detect_then_long(bytes: &[u8]) -> usize {
 /// `non_ascii` saves no registers for it.
 ///
 /// # Safety
-/// `bytes` must be valid UTF-8 with an ASCII prefix of `start` bytes.
+/// `bytes` must have an ASCII prefix of `start` bytes, and
+/// `start < bytes.len()`.
 #[inline(never)]
 unsafe fn utf16_len_sse2_long(bytes: &[u8], start: usize) -> usize {
     // SAFETY: the caller's contract, and SSE2 is baseline on x86_64.
@@ -234,8 +233,7 @@ pub(crate) fn kernels() -> Vec<crate::__kernels::Kernel> {
 
 /// The ASCII prefix scan, then `kernel` on the rest, like `utf16_len`.
 #[inline(always)]
-fn with_kernel(s: &str, kernel: impl FnOnce(&[u8], usize) -> usize) -> usize {
-    let bytes = s.as_bytes();
+fn with_kernel(bytes: &[u8], kernel: impl FnOnce(&[u8], usize) -> usize) -> usize {
     let start = crate::ascii::ascii_prefix_len(bytes);
     if start == bytes.len() {
         start
@@ -244,34 +242,34 @@ fn with_kernel(s: &str, kernel: impl FnOnce(&[u8], usize) -> usize) -> usize {
     }
 }
 
-fn sse2(s: &str) -> usize {
-    // SAFETY: SSE2 is baseline on x86_64, and with_kernel passes a valid str's
-    // bytes with a verified ASCII prefix.
-    with_kernel(s, |bytes, start| unsafe { utf16_len_sse2(bytes, start) })
+fn sse2(bytes: &[u8]) -> usize {
+    // SAFETY: SSE2 is baseline on x86_64, and with_kernel passes a verified
+    // ASCII prefix shorter than bytes.
+    with_kernel(bytes, |bytes, start| unsafe { utf16_len_sse2(bytes, start) })
 }
 
-fn avx2(s: &str) -> usize {
+fn avx2(bytes: &[u8]) -> usize {
     // SAFETY: `kernels` only lists this after detecting AVX2.
-    if s.len() >= LONG_MIN {
-        return unsafe { utf16_len_avx2_long(s.as_bytes()) };
+    if bytes.len() >= LONG_MIN {
+        return unsafe { utf16_len_avx2_long(bytes) };
     }
-    with_kernel(s, |bytes, start| unsafe { utf16_len_avx2(bytes, start) })
+    with_kernel(bytes, |bytes, start| unsafe { utf16_len_avx2(bytes, start) })
 }
 
 #[cfg(feature = "avx512")]
-fn avx512(s: &str) -> usize {
+fn avx512(bytes: &[u8]) -> usize {
     // SAFETY: `kernels` only lists this after detecting AVX-512BW.
-    if s.len() >= LONG_MIN {
-        return unsafe { utf16_len_avx512_long(s.as_bytes()) };
+    if bytes.len() >= LONG_MIN {
+        return unsafe { utf16_len_avx512_long(bytes) };
     }
-    with_kernel(s, |bytes, start| unsafe { utf16_len_avx512(bytes, start) })
+    with_kernel(bytes, |bytes, start| unsafe { utf16_len_avx512(bytes, start) })
 }
 
 /// SSE2 kernel, `#[inline(always)]` so short inputs run it inside `non_ascii`
 /// with no further call.
 ///
 /// # Safety
-/// `bytes` must be valid UTF-8 with an ASCII prefix of `start` bytes, and
+/// `bytes` must have an ASCII prefix of `start` bytes, and
 /// `start < bytes.len()`.
 #[inline(always)]
 unsafe fn utf16_len_sse2(bytes: &[u8], start: usize) -> usize {
@@ -358,8 +356,8 @@ unsafe fn utf16_len_sse2(bytes: &[u8], start: usize) -> usize {
 /// nibble-table classifier does.
 ///
 /// # Safety
-/// The CPU must support AVX2, and `bytes` must be valid UTF-8 with an ASCII
-/// prefix of `start` bytes.
+/// The CPU must support AVX2, and `bytes` must have an ASCII prefix of
+/// `start` bytes.
 #[target_feature(enable = "avx2")]
 unsafe fn utf16_len_avx2(bytes: &[u8], start: usize) -> usize {
     const LANES: usize = 32;
@@ -450,8 +448,8 @@ unsafe fn utf16_len_avx2(bytes: &[u8], start: usize) -> usize {
 /// needs no exact prefix.
 ///
 /// # Safety
-/// The CPU must support AVX2, and `bytes` must be valid UTF-8 of at least
-/// `LONG_MIN` bytes.
+/// The CPU must support AVX2, and `bytes` must hold at least `LONG_MIN`
+/// bytes.
 #[target_feature(enable = "avx2")]
 unsafe fn utf16_len_avx2_long(bytes: &[u8]) -> usize {
     const BLOCK: usize = 128;
@@ -482,8 +480,8 @@ unsafe fn utf16_len_avx2_long(bytes: &[u8]) -> usize {
 /// 256-byte blocks.
 ///
 /// # Safety
-/// The CPU must support AVX-512BW, and `bytes` must be valid UTF-8 of at
-/// least `LONG_MIN` bytes.
+/// The CPU must support AVX-512BW, and `bytes` must hold at least
+/// `LONG_MIN` bytes.
 #[cfg(feature = "avx512")]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn utf16_len_avx512_long(bytes: &[u8]) -> usize {
@@ -516,8 +514,8 @@ unsafe fn utf16_len_avx512_long(bytes: &[u8]) -> usize {
 /// neither a copy nor an over-read.
 ///
 /// # Safety
-/// The CPU must support AVX-512BW, and `bytes` must be valid UTF-8 with an
-/// ASCII prefix of `start` bytes.
+/// The CPU must support AVX-512BW, and `bytes` must have an ASCII prefix of
+/// `start` bytes.
 #[cfg(feature = "avx512")]
 #[target_feature(enable = "avx512f,avx512bw")]
 unsafe fn utf16_len_avx512(bytes: &[u8], start: usize) -> usize {

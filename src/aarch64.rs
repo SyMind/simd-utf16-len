@@ -32,23 +32,21 @@ unsafe fn sum_byte_lanes(v: uint8x16_t) -> usize {
     sum
 }
 
-/// Compute the number of UTF-16 code units for UTF-8 string using NEON.
+/// Compute the number of UTF-16 code units for UTF-8 bytes using NEON.
 #[inline]
-pub fn utf16_len(s: &str) -> usize {
-    let bytes = s.as_bytes();
+pub(crate) fn utf16_len(bytes: &[u8]) -> usize {
     let start = crate::ascii::ascii_prefix_len(bytes);
     if start == bytes.len() {
         start
     } else {
-        // SAFETY: bytes comes from a valid str, and start is a verified ASCII
-        // prefix shorter than it.
+        // SAFETY: start is a verified ASCII prefix shorter than bytes.
         unsafe { utf16_len_neon(bytes, start) }
     }
 }
 
 /// One batch's merged byte lanes, widened pairwise into the running 64-bit
 /// total. Each u64 lane counts only its own eight byte lanes' units, so it
-/// stays below the input's length and cannot wrap for any input a `&str`
+/// stays below the input's length and cannot wrap for any input a slice
 /// can hold. Factored out so the regression tests drive the production
 /// accumulation, not a copy of it.
 ///
@@ -75,8 +73,8 @@ unsafe fn combine(start: usize, merged: uint8x16_t, total: uint64x2_t) -> usize 
 /// turns down calls `utf16_len` as before.
 ///
 /// # Safety
-/// `bytes` must be valid UTF-8 with an ASCII prefix of `start` bytes, and
-/// `start < bytes.len()`.
+/// `bytes` must have an ASCII prefix of `start` bytes, and `start <
+/// bytes.len()`.
 #[inline(always)]
 unsafe fn utf16_len_neon(bytes: &[u8], start: usize) -> usize {
     const LANES: usize = 16;

@@ -13,6 +13,16 @@ assert_eq!(utf16_len("Hello, 世界! 🌍"), 13);
 
 The result counts UTF-16 code units. Characters outside the Basic Multilingual Plane, such as `🌍`, contribute two units.
 
+For UTF-8 held as bytes rather than a `str`, `utf16_len_bytes` counts a `&[u8]` without validating it:
+
+```rust
+use simd_utf16_len::utf16_len_bytes;
+
+assert_eq!(utf16_len_bytes("Hello, 世界! 🌍".as_bytes()), 13);
+```
+
+Its result is only accurate for valid UTF-8; for other bytes it is unspecified, though the call is still safe.
+
 ## How it works
 
 Computing the UTF-16 length of a UTF-8 string doesn't require actually encoding it. The length can be derived directly from byte patterns:
@@ -37,7 +47,7 @@ Call `utf16_len(s)` directly when the ASCII status is unknown. If the caller alr
 | x86_64 | AVX2 / SSE2, or AVX-512BW with the `avx512` feature (not on Zen 4) | Runtime dispatch; SSE2 available by default on this architecture |
 | aarch64 | NEON | Available by default on this architecture |
 | wasm32 | simd128 | Requires `target_feature = "simd128"` |
-| Other | — | Falls back to `encode_utf16().count()` |
+| Other | — | Falls back to the same formula, one byte at a time |
 
 ## Benchmarks
 

@@ -128,7 +128,7 @@ fn utf16_len_never_reads_past_the_input() {
                 assert_eq!(utf16_len(s), expected, "len: {len}");
                 for kernel in __kernels::available() {
                     assert_eq!(
-                        (kernel.utf16_len)(s),
+                        (kernel.utf16_len)(bytes),
                         expected,
                         "{} kernel, len: {len}",
                         kernel.name,
